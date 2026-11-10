@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.0.0 — 2026-11-10
+First stable release. Earlier 0.1.x releases were removed; their history is kept below.
+
 ## v0.1.9 — 2026-11-10
 - Client: `/buzz` shakes everyone's screen for 1s and shows an animated `⚡ ~~ <name> buzzzz! (ﾉ°Д°)ﾉ ~~ ⚡` banner for 2s (10s cooldown; older clients just see `/buzz`).
 - Client: `/iam` shows who you are (display name and username).
