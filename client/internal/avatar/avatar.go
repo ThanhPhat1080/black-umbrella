@@ -35,9 +35,7 @@ func hslToRGB(h, s, l float64) (uint8, uint8, uint8) {
 // Grid derives the colour (#rrggbb) and a vertically symmetric 5x5 pattern (15 bits) from SHA-256(username).
 func Grid(username string) (grid [5][5]bool, color string) {
 	h := sha256.Sum256([]byte(username))
-	hue := float64(uint16(h[0])<<8|uint16(h[1])) / 65536 * 360
-	r, g, b := hslToRGB(hue, 0.65, 0.6)
-	color = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	color = hexHSL(Hue(username), 0.65, 0.6)
 	bits := uint16(h[2])<<8 | uint16(h[3])
 	for i := 0; i < 15; i++ {
 		row, col := i/3, i%3
@@ -85,4 +83,21 @@ func Color(username string) string {
 // Dot is a coloured ■ for message lines.
 func Dot(username string) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(Color(username))).Render("■")
+}
+
+// Hue is the user's identicon hue in degrees [0, 360).
+func Hue(username string) float64 {
+	h := sha256.Sum256([]byte(username))
+	return float64(uint16(h[0])<<8|uint16(h[1])) / 65536 * 360
+}
+
+func hexHSL(h, s, l float64) string {
+	r, g, b := hslToRGB(h, s, l)
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// NameColor is the colour of the user's display name: the avatar hue with clamped saturation
+// and lightness, lighter on dark terminals (identical to the avatar colour) and darker on light ones.
+func NameColor(username string) lipgloss.AdaptiveColor {
+	return lipgloss.AdaptiveColor{Dark: hexHSL(Hue(username), 0.65, 0.6), Light: hexHSL(Hue(username), 0.65, 0.4)}
 }

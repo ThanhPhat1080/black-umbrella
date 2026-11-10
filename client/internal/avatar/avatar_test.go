@@ -49,3 +49,24 @@ func TestDot(t *testing.T) {
 		t.Fatal(d)
 	}
 }
+
+func TestNameColorStableAndSpread(t *testing.T) {
+	if NameColor("alice") != NameColor("alice") {
+		t.Fatal("not stable")
+	}
+	names := []string{"alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi", "ivan", "judy"}
+	seen := map[int]bool{}
+	for _, n := range names {
+		seen[int(Hue(n)/15)] = true // 15-degree buckets
+	}
+	if len(seen) < 6 {
+		t.Fatalf("only %d distinct hues among %d names", len(seen), len(names))
+	}
+	c := NameColor("alice")
+	if c.Dark != Color("alice") {
+		t.Fatalf("dark variant %s must match the avatar colour %s", c.Dark, Color("alice"))
+	}
+	if c.Light == c.Dark || c.Light == "" {
+		t.Fatalf("light variant %q", c.Light)
+	}
+}

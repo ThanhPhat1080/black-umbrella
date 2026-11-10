@@ -350,7 +350,7 @@ func TestStyleBodyDoesNotStylePunctuationAfterLink(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(old)
 	got := styleBody("see https://a.b/c, ok (https://x.y/z).", "me")
-	if !strings.Contains(got, linkSt.Render("https://a.b/c")+",") || !strings.Contains(got, linkSt.Render("https://x.y/z")+").") {
+	if !strings.Contains(got, linkSt.Italic(true).Render("https://a.b/c")+"\x1b[3m,") || !strings.Contains(got, linkSt.Italic(true).Render("https://x.y/z")+"\x1b[3m).") {
 		t.Fatalf("%q", got)
 	}
 }
@@ -717,5 +717,72 @@ func TestInputBoxRendersBorderedAndFocusStyled(t *testing.T) {
 	}
 	if !strings.Contains(focused, accent.Render("╭")) && !strings.Contains(focused, "\x1b[38;5;39m╭") {
 		t.Fatal("focused border should use the accent colour")
+	}
+}
+
+func TestMessageStylingItalicBodyColouredName(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	defer lipgloss.SetColorProfile(old)
+
+	nameEsc := nameStyle("alice").Render("A")
+	nameEsc = nameEsc[:strings.Index(nameEsc, "A")] // the opening escape sequence for alice's name
+	if !strings.Contains(nameEsc, "38;2;") {
+		t.Fatalf("expected a truecolor escape, got %q", nameEsc)
+	}
+	m := chat.Msg{ID: "m1", Conv: "hell", Sender: "alice", Text: "hello @bob see https://a.b/c.", CreatedAt: time.Unix(1700000000, 0)}
+	lines := renderMessage(m, msgView{Name: "Alice", Me: "bob", Width: 80})
+	if !strings.Contains(lines[0], nameEsc) || !strings.Contains(lines[0], "\x1b[1") {
+		t.Fatalf("header should have alice's bold colour %q: %q", nameEsc, lines[0])
+	}
+	if strings.Contains(lines[0], "\x1b[3m") {
+		t.Fatalf("header must not be italic: %q", lines[0])
+	}
+	body := lines[1]
+	if !strings.Contains(body, "\x1b[3m") {
+		t.Fatalf("body should be italic: %q", body)
+	}
+	if !strings.Contains(body, linkSt.Italic(true).Render("https://a.b/c")+"\x1b[3m.") && !strings.Contains(body, "https://a.b/c") {
+		t.Fatalf("link lost: %q", body)
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "📋") && strings.Contains(l[strings.Index(l, "[📋]")-1:], "\x1b[3m[") {
+			t.Fatalf("buttons must not be italic: %q", l)
+		}
+	}
+	// system lines stay dim and upright
+	for _, root := range []*chat.Msg{nil} {
+		for _, b := range renderThread(root, nil, func(s string) string { return s }, "me", 40, -1)[:1] {
+			if strings.Contains(strings.Join(b, ""), "\x1b[3m") || !strings.Contains(strings.Join(b, ""), "[message expired]") {
+				t.Fatalf("expired placeholder: %q", b)
+			}
+		}
+	}
+	u := chat.Msg{ID: "m2", Conv: "hell", Sender: "alice", Text: chat.UndecryptableText, Undecryptable: true, CreatedAt: time.Now()}
+	if l := strings.Join(renderMessage(u, msgView{Name: "Alice", Width: 60}), "\n"); strings.Contains(l, "\x1b[3m") {
+		t.Fatalf("undecryptable must not be italic: %q", l)
+	}
+}
+
+func TestNamesColouredEverywhere(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	defer lipgloss.SetColorProfile(old)
+	m, _, _ := newTestModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	esc := nameStyle("bob").Render("B")
+	esc = esc[:strings.Index(esc, "B")]
+	if v := m.View(); !strings.Contains(v, esc) { // sidebar label
+		t.Fatalf("sidebar label not in bob's colour")
+	}
+	m.onEvent(proto.Event{T: "typing", Conv: "hell", Username: "bob"})
+	if v := m.View(); strings.Count(v, esc) < 2 {
+		t.Fatalf("typing indicator not in bob's colour")
+	}
+	m.overlay, m.profileUser = overlayProfile, "bob"
+	if v := m.View(); !strings.Contains(v, esc) {
+		t.Fatal("profile name not in bob's colour")
 	}
 }

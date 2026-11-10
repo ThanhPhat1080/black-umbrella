@@ -26,10 +26,16 @@ var (
 	linkSt    = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Underline(true)
 	errSt     = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	nameSt    = lipgloss.NewStyle().Bold(true)
+	italicSt  = lipgloss.NewStyle().Italic(true)
 )
 
 // wrapText wraps s to at most width display cells per line without ever splitting a rune.
 // Explicit newlines are kept; words longer than width are broken between runes.
+// nameStyle is bold in the user's own colour (the same hue as their identicon).
+func nameStyle(username string) lipgloss.Style {
+	return lipgloss.NewStyle().Bold(true).Foreground(avatar.NameColor(username))
+}
+
 func wrapText(s string, width int) []string {
 	if width < 1 {
 		width = 1
@@ -114,6 +120,7 @@ func splitTokens(s string) []string {
 
 var mentionRe = regexp.MustCompile(`@[A-Za-z0-9_]+`)
 
+// styleBody styles a (wrapped) body line: italic text, links underlined, mentions of me highlighted.
 func styleBody(line, me string) string {
 	var out strings.Builder
 	rest := line
@@ -123,7 +130,7 @@ func styleBody(line, me string) string {
 			continue
 		}
 		out.WriteString(styleMentions(rest[:i], me))
-		out.WriteString(linkSt.Render(u))
+		out.WriteString(linkSt.Italic(true).Render(u))
 		rest = rest[i+len(u):]
 	}
 	out.WriteString(styleMentions(rest, me))
@@ -131,15 +138,27 @@ func styleBody(line, me string) string {
 }
 
 func styleMentions(s, me string) string {
-	if me == "" {
+	var out strings.Builder
+	pos := 0
+	if me != "" {
+		for _, loc := range mentionRe.FindAllStringIndex(s, -1) {
+			if !strings.EqualFold(s[loc[0]+1:loc[1]], me) {
+				continue
+			}
+			out.WriteString(italic(s[pos:loc[0]]))
+			out.WriteString(mentionSt.Italic(true).Render(s[loc[0]:loc[1]]))
+			pos = loc[1]
+		}
+	}
+	out.WriteString(italic(s[pos:]))
+	return out.String()
+}
+
+func italic(s string) string {
+	if s == "" {
 		return s
 	}
-	return mentionRe.ReplaceAllStringFunc(s, func(m string) string {
-		if strings.EqualFold(m[1:], me) {
-			return mentionSt.Render(m)
-		}
-		return m
-	})
+	return italicSt.Render(s)
 }
 
 type msgView struct {
@@ -159,7 +178,7 @@ func renderMessage(m chat.Msg, v msgView) []string {
 	if v.Selected {
 		prefix = accent.Render("▌")
 	}
-	head := zone.Mark("av:"+m.ID, avatar.Dot(m.Sender)) + " " + nameSt.Render(v.Name) + "  " + dim.Render(m.CreatedAt.Local().Format("15:04"))
+	head := zone.Mark("av:"+m.ID, avatar.Dot(m.Sender)) + " " + nameStyle(m.Sender).Render(v.Name) + "  " + dim.Render(m.CreatedAt.Local().Format("15:04"))
 	if m.ParentID != "" && !v.InThread {
 		head += "  " + dim.Render("↳ reply to "+chat.ExpiredText)
 	}
@@ -173,7 +192,7 @@ func renderMessage(m chat.Msg, v msgView) []string {
 	for i := range body {
 		s := body[i]
 		if m.Undecryptable {
-			s = dim.Italic(true).Render(s)
+			s = dim.Render(s)
 		} else {
 			s = styleBody(s, v.Me)
 		}
@@ -227,7 +246,7 @@ func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, 
 	var blocks [][]string
 	idx := 0
 	if root == nil || root.Text == chat.ExpiredText && root.Sender == "" {
-		blocks = append(blocks, []string{" " + dim.Italic(true).Render(chat.ExpiredText)})
+		blocks = append(blocks, []string{" " + dim.Render(chat.ExpiredText)})
 	} else {
 		blocks = append(blocks, renderMessage(*root, msgView{Name: name(root.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
 		idx++
@@ -377,11 +396,11 @@ func (m *Model) nameOf(u string) string { return m.st.DisplayName(u) }
 
 func (m *Model) convTitle(conv string) string {
 	if conv == "hell" {
-		return "# Hell room"
+		return nameSt.Render("# Hell room")
 	}
 	for _, e := range m.st.Sidebar() {
 		if e.Conv == conv {
-			return e.Label + " " + dim.Render("@"+e.Username)
+			return nameStyle(e.Username).Render(e.Label) + " " + dim.Render("@"+e.Username)
 		}
 	}
 	return conv
@@ -416,9 +435,7 @@ func (m *Model) viewSidebar(w, h int) string {
 			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
 		}
 		label := truncate(e.Label, inner-13)
-		if e.Conv == active {
-			label = accent.Render(label)
-		}
+		label = nameStyle(e.Username).Underline(e.Conv == active).Render(label)
 		info := []string{dot + " " + label, dim.Render(truncate("@"+e.Username, inner-11)), strings.TrimSpace(badge)}
 		var b []string
 		for i := 0; i < 3; i++ {
@@ -491,13 +508,13 @@ func joinCols(cols []string) string {
 func (m *Model) viewChat(w, h int) string {
 	inner := w - 2
 	conv := m.st.Active()
-	title := nameSt.Render(m.convTitle(conv))
+	title := m.convTitle(conv)
 	if ty := m.st.Typing(conv, time.Now()); len(ty) > 0 {
 		var names []string
 		for _, u := range ty {
-			names = append(names, m.nameOf(u))
+			names = append(names, nameStyle(u).Render(m.nameOf(u)))
 		}
-		title += "  " + dim.Italic(true).Render(strings.Join(names, ", ")+" is typing…")
+		title += "  " + strings.Join(names, dim.Render(", ")) + dim.Italic(true).Render(" is typing…")
 	}
 	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
 	var target string
@@ -625,7 +642,7 @@ func (m *Model) overlayView() []string {
 				seen = "last seen " + humanAgo(time.Since(time.UnixMilli(*u.LastSeen)))
 			}
 		}
-		lines = append(lines, "", nameSt.Render(u.DisplayName), dim.Render("@"+u.Username),
+		lines = append(lines, "", nameStyle(u.Username).Render(u.DisplayName), dim.Render("@"+u.Username),
 			"joined "+time.UnixMilli(u.JoinedAt).Local().Format("2 Jan 2006"), seen, "", dim.Render("press any key"))
 	}
 	inner := 0
