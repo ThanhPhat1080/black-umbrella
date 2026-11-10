@@ -101,3 +101,33 @@ func hexHSL(h, s, l float64) string {
 func NameColor(username string) lipgloss.AdaptiveColor {
 	return lipgloss.AdaptiveColor{Dark: hexHSL(Hue(username), 0.65, 0.6), Light: hexHSL(Hue(username), 0.65, 0.4)}
 }
+
+// quadrants maps TL | TR<<1 | BL<<2 | BR<<3 to the matching quadrant block character.
+var quadrants = []rune{' ', '▘', '▝', '▀', '▖', '▌', '▞', '▛', '▗', '▚', '▐', '▜', '▄', '▙', '▟', '█'}
+
+// Mini is a one-line, 3-cell identicon (2x2 quadrant blocks per cell) folded from the 5x5 grid.
+// It is left/right symmetric like the full identicon. Colour it with Color(username).
+func Mini(username string) string {
+	g, _ := Grid(username)
+	var top, bot [3]int
+	for c := 0; c < 3; c++ {
+		top[c] = b2i(g[0][c]) ^ b2i(g[1][c])
+		bot[c] = b2i(g[2][c]) ^ b2i(g[3][c]) ^ b2i(g[4][c])
+	}
+	// Sub-columns s0..s5 mirror: s5=s0, s4=s1, s3=s2.
+	sub := [6]int{0, 1, 2, 2, 1, 0}
+	var out []rune
+	for cell := 0; cell < 3; cell++ {
+		l, r := sub[cell*2], sub[cell*2+1]
+		idx := top[l] | top[r]<<1 | bot[l]<<2 | bot[r]<<3
+		out = append(out, quadrants[idx])
+	}
+	return string(out)
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}

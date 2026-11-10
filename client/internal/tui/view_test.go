@@ -655,12 +655,12 @@ func TestClickPlusAndSidebarEntry(t *testing.T) {
 		t.Fatal("[+] did not open the picker")
 	}
 	m.overlay = overlayNone
-	sz := waitZone(t, m, "side:dm:bob|me:0")
+	sz := waitZone(t, m, "side:dm:bob|me")
 	m.Update(click(sz.StartX+2, sz.StartY))
 	if m.st.Active() != "dm:bob|me" {
 		t.Fatalf("active %q", m.st.Active())
 	}
-	az := waitZone(t, m, "avs:bob:0")
+	az := waitZone(t, m, "avs:bob")
 	m.Update(click(az.StartX+1, az.StartY))
 	if m.overlay != overlayProfile || m.profileUser != "bob" {
 		t.Fatalf("avatar click: overlay=%v user=%q", m.overlay, m.profileUser)
@@ -967,6 +967,107 @@ func TestThreadPanelScrollsWithoutHidingReplies(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		if !strings.Contains(v, fmt.Sprintf("tra loi %d", i)) {
 			t.Fatalf("reply %d hidden:\n%s", i, v)
+		}
+	}
+}
+
+func sidebarModel(t *testing.T) *Model {
+	t.Helper()
+	m, me, bob := newTestModel(t)
+	zed, _ := e2e.GenerateKeyPair()
+	m.onEvent(proto.Event{T: "user", User: &proto.User{Username: "zed", DisplayName: "Zed Zed", PublicKey: base64.StdEncoding.EncodeToString(zed.Public[:]), Online: false}})
+	_, _ = me, bob
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	return m
+}
+
+func sideRows(m *Model) []string {
+	var rows []string
+	for _, l := range strings.Split(m.viewSidebar(24, 33), "\n") {
+		rows = append(rows, l)
+	}
+	return rows
+}
+
+func TestSidebarOneLinePerUserWithSeparator(t *testing.T) {
+	m := sidebarModel(t) // users: me (not listed), bob, zed
+	rows := sideRows(m)
+	var content []string
+	for _, r := range rows[1 : len(rows)-1] {
+		if p := strings.TrimSpace(strings.Trim(ansi.Strip(r), "│")); p != "" {
+			content = append(content, p)
+		}
+	}
+	// Hell room, separator, bob, zed: exactly one line per user
+	if len(content) != 4 {
+		t.Fatalf("want 4 content rows, got %d: %q", len(content), content)
+	}
+	if !strings.Contains(content[0], "Hell room") || strings.Trim(content[1], "─") != "" {
+		t.Fatalf("separator missing under Hell room: %q", content)
+	}
+	if !strings.Contains(content[2], "Phát") || !strings.Contains(content[3], "Zed Zed") {
+		t.Fatalf("user rows: %q", content)
+	}
+	if w := width(strings.Trim(ansi.Strip(rows[2]), "│")); w != 22 {
+		t.Fatalf("separator width %d, want 22", w)
+	}
+}
+
+func TestSidebarActiveRowHasBackgroundAcrossWidth(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	defer lipgloss.SetColorProfile(old)
+	m := sidebarModel(t)
+	for _, active := range []string{"hell", "dm:bob|me"} {
+		m.st.SetActive(active)
+		var activeRows, otherRows int
+		for _, r := range sideRows(m) {
+			plain := ansi.Strip(r)
+			if !strings.ContainsAny(plain, "#ZP") || strings.Contains(plain, "─") {
+				continue
+			}
+			isActive := (active == "hell" && strings.Contains(plain, "Hell room")) || (active != "hell" && strings.Contains(plain, "Phát"))
+			if isActive {
+				activeRows++
+				if !strings.Contains(r, "48;2;") {
+					t.Fatalf("active row %q has no background SGR: %q", active, r)
+				}
+				if w := width(plain); w != 24 {
+					t.Fatalf("row width %d", w)
+				}
+				// the background must still be on after every inner style reset
+				if strings.Contains(r, "\x1b[0m\x1b[0m") {
+					t.Fatal("odd reset sequence")
+				}
+			} else {
+				otherRows++
+				if strings.Contains(r, "48;2;") {
+					t.Fatalf("inactive row has a background: %q", r)
+				}
+			}
+		}
+		if activeRows != 1 || otherRows == 0 {
+			t.Fatalf("active=%q: activeRows=%d otherRows=%d", active, activeRows, otherRows)
+		}
+	}
+}
+
+func TestSelectedMessageHasFullWidthBackground(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	defer lipgloss.SetColorProfile(old)
+	mm := msg("hello https://a.b/c\nsecond line @me")
+	for _, sel := range []bool{true, false} {
+		for _, l := range renderMessage(mm, msgView{Name: "Bob", Me: "me", Width: 50, Selected: sel}) {
+			has := strings.Contains(l, "48;2;")
+			if has != sel {
+				t.Fatalf("selected=%v line background=%v: %q", sel, has, l)
+			}
+			if sel && width(l) != 50 {
+				t.Fatalf("selected line width %d, want 50: %q", width(l), l)
+			}
 		}
 	}
 }

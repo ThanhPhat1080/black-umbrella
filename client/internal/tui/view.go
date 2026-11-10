@@ -173,16 +173,21 @@ type msgView struct {
 //
 //	■ Name  hh:mm
 //	  text…                 [📋][⚓][💬 N]
-func renderMessage(m chat.Msg, v msgView) []string {
+func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	prefix := " "
 	if v.Selected {
 		prefix = accent.Render("▌")
+		defer func() {
+			for i := range lines {
+				lines[i] = bgFill(lines[i], v.Width, selectBg)
+			}
+		}()
 	}
 	head := zone.Mark("av:"+m.ID, avatar.Dot(m.Sender)) + " " + nameStyle(m.Sender).Render(v.Name) + "  " + dim.Render(m.CreatedAt.Local().Format("15:04"))
 	if m.ParentID != "" && !v.InThread {
 		head += "  " + dim.Render("↳ reply to "+chat.ExpiredText)
 	}
-	lines := []string{prefix + head}
+	lines = []string{prefix + head}
 
 	textW := v.Width - 3
 	if textW < 1 {
@@ -417,59 +422,75 @@ func (m *Model) convTitle(conv string) string {
 	return conv
 }
 
+// Row backgrounds: a subtle accent, readable on dark and light terminals.
+var (
+	activeBg = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#2a3b5c", Light: "#dbe6ff"})
+	selectBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#232f47", Light: "#e8eefc"})
+)
+
+// bgFill pads line to w cells and paints st's background (and weight) across all of it. Inner
+// styles end with a full reset, so the opening sequence is re-issued after every reset.
+func bgFill(line string, w int, st lipgloss.Style) string {
+	line = padTo(line, w)
+	probe := st.Render("x")
+	i := strings.Index(probe, "x")
+	if i <= 0 { // terminal without colour: nothing to paint
+		return line
+	}
+	pre := probe[:i]
+	return pre + strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+pre) + "\x1b[0m"
+}
+
 func (m *Model) viewSidebar(w, h int) string {
 	inner := w - 2
 	active := m.st.Active()
-	var blocks [][]string
-	activeIdx := 0
-	for i, e := range m.st.Sidebar() {
-		if e.Conv == active {
-			activeIdx = i
-		}
-		badge := ""
-		if e.Unread > 0 {
-			badge = accent.Render(fmt.Sprintf(" (%d)", e.Unread))
-		}
-		mark := func(i int, s string) string { return zone.Mark(fmt.Sprintf("side:%s:%d", e.Conv, i), s) }
-		if e.Conv == "hell" {
-			label := nameSt.Render("# Hell room")
-			if e.Conv == active {
-				label = accent.Render("# Hell room")
-			}
-			blocks = append(blocks, []string{mark(0, label+badge)})
-			continue
-		}
-		av := avatar.Render(e.Username)
-		col := lipgloss.NewStyle().Foreground(lipgloss.Color(avatar.Color(e.Username)))
-		dot := dim.Render("○")
-		if e.Online {
-			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
-		}
-		label := truncate(e.Label, inner-13)
-		label = nameStyle(e.Username).Underline(e.Conv == active).Render(label)
-		info := []string{dot + " " + label, dim.Render(truncate("@"+e.Username, inner-11)), strings.TrimSpace(badge)}
-		var b []string
-		for i := 0; i < 3; i++ {
-			b = append(b, zone.Mark(fmt.Sprintf("avs:%s:%d", e.Username, i), col.Render(av[i]))+" "+mark(i, info[i]))
-		}
-		blocks = append(blocks, b)
-	}
 	var lines []string
-	start := 0
-	for i, b := range blocks {
-		if i == activeIdx {
-			start = len(lines)
+	activeLine := 0
+	for _, e := range m.st.Sidebar() {
+		badge, badgeW := "", 0
+		if e.Unread > 0 {
+			n := fmt.Sprintf("%d", e.Unread)
+			badge, badgeW = accent.Render(n), len(n)
 		}
-		lines = append(lines, b...)
+		var row string
+		if e.Conv == "hell" {
+			row = padTo(nameSt.Render("# Hell room"), inner-badgeW-1) + " " + badge
+			if badgeW == 0 {
+				row = nameSt.Render("# Hell room")
+			}
+			row = zone.Mark("side:hell", padTo(row, inner))
+		} else {
+			dot := dim.Render("○")
+			if e.Online {
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
+			}
+			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(avatar.Color(e.Username))).Render(avatar.Mini(e.Username))
+			avail := inner - 6 // mini(3) + space + dot + space
+			nameW := avail
+			if badgeW > 0 {
+				nameW = avail - badgeW - 1
+			}
+			label := nameStyle(e.Username).Render(truncate(e.Label, maxInt(1, nameW)))
+			rest := dot + " " + padTo(label, maxInt(1, nameW))
+			if badgeW > 0 {
+				rest += " " + badge
+			}
+			row = zone.Mark("avs:"+e.Username, mini) + zone.Mark("side:"+e.Conv, " "+padTo(rest, inner-4))
+		}
+		if e.Conv == active {
+			activeLine = len(lines)
+			row = bgFill(row, inner, activeBg)
+		}
+		lines = append(lines, row)
+		if e.Conv == "hell" {
+			lines = append(lines, dim.Render(strings.Repeat("─", inner)))
+		}
 	}
 	off := 0
-	if start+3 > h-2 {
-		off = start + 3 - (h - 2)
+	if activeLine >= h-2 {
+		off = activeLine - (h - 2) + 1
 	}
-	if off > len(lines) {
-		off = len(lines)
-	}
-	return paneBox(fit(lines[off:], inner, h-2), inner, false)
+	return paneBox(fit(lines[minInt(off, len(lines)):], inner, h-2), inner, false)
 }
 
 // paneBox draws a rounded border by hand (lipgloss would measure widths its own way).

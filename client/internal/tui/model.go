@@ -800,15 +800,13 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	for _, e := range m.st.Sidebar() {
-		for i := 0; i < 3; i++ {
-			if e.Username != "" && zone.Get(fmt.Sprintf("avs:%s:%d", e.Username, i)).InBounds(msg) {
-				m.showProfile(e.Username)
-				return m, nil
-			}
-			if zone.Get(fmt.Sprintf("side:%s:%d", e.Conv, i)).InBounds(msg) {
-				m.switchConv(e.Conv)
-				return m, nil
-			}
+		if e.Username != "" && zone.Get("avs:"+e.Username).InBounds(msg) {
+			m.showProfile(e.Username)
+			return m, nil
+		}
+		if zone.Get("side:" + e.Conv).InBounds(msg) {
+			m.switchConv(e.Conv)
+			return m, nil
 		}
 	}
 	var visible []chat.Msg

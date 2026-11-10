@@ -132,18 +132,20 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 ```
 ╭──────────────────────╮╭────────────────────────────────────╮╭──────────────────────╮
 │# Hell room        3  ││# Hell room                         ││Thread  (Esc to close)│
-│▄▄▄▄  ▄▄▄▄ ● Bob 🌂   ││ ■ Alice Nguyễn  09:15              ││ ■ Alice  09:15       │
-│████▀▀████ @bob       ││   Chào @bob, xem link này nha      ││   Chào @bob…         │
-│▀▀▀▀  ▀▀▀▀            ││   https://example.com [📋][⚓][💬 2]││ ──────────────────── │
-│██  ██  ██ ○ Carol    ││ ■ Bob 🌂  09:16                    ││ ■ Bob  09:17         │
-│ ...                  ││   ok (＾▽＾)                       ││   đã xem ✅          │
-│                      ││› Message…                          ││                      │
+│──────────────────────││ ■ Alice Nguyễn  09:15              ││ ■ Alice  09:15       │
+│▙▄▟ ● Alice        2  ││   Chào @bob, xem link này nha      ││   Chào @bob…         │
+│▜▀▛ ○ Carol           ││   https://example.com [📋][💬 2]   ││ ──────────────────── │
+│ ...                  ││ ■ Bob 🌂  09:16                    ││ ■ Bob  09:17         │
+│                      ││   ok (＾▽＾)                       ││   đã xem ✅          │
+│                      ││╭──────────────────────────────────╮││                      │
+│                      │││ Message…                         │││                      │
+│                      ││╰──────────────────────────────────╯││                      │
 │                      ││[+] kaomoji  0/4000                 ││                      │
 ╰──────────────────────╯╰────────────────────────────────────╯╰──────────────────────╯
  Umbrella @bob · Enter send · Alt+Enter newline · …
 ```
 
-- **Sidebar trái**: `# Hell room` luôn ở trên cùng; bên dưới là mọi người — ai online (`●`) lên trước, rồi theo bảng chữ cái. Số bên cạnh là số tin chưa đọc.
+- **Sidebar trái**: `# Hell room` luôn ở trên cùng, rồi một đường kẻ phân cách; bên dưới mỗi người **một dòng**: avatar mini 3 ô (cùng màu với tên và identicon), chấm online (`●`/`○`), tên (màu riêng của từng người) và số tin chưa đọc bên phải. Ai online lên trước, rồi theo bảng chữ cái. Hàng đang mở được tô nền; click avatar mini để xem profile (identicon đầy đủ), click phần còn lại để mở tin nhắn riêng. Tin đang chọn trong khung chat cũng được tô nền.
 - **Khung giữa**: tin nhắn của cuộc trò chuyện đang mở, ô nhập ở dưới.
 - **Panel phải**: thread, chỉ hiện khi bạn mở một thread.
 - **Thanh dưới cùng**: trạng thái và gợi ý phím tắt.

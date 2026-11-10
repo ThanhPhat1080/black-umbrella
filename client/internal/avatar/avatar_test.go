@@ -70,3 +70,37 @@ func TestNameColorStableAndSpread(t *testing.T) {
 		t.Fatalf("light variant %q", c.Light)
 	}
 }
+
+func TestMini(t *testing.T) {
+	names := []string{"alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi", "ivan", "judy", "mallory", "trent"}
+	seen := map[string]bool{}
+	for _, n := range names {
+		m := Mini(n)
+		if m != Mini(n) {
+			t.Fatal("not deterministic")
+		}
+		if w := runewidth.StringWidth(m); w != 3 {
+			t.Fatalf("%s: width %d (%q)", n, w, m)
+		}
+		seen[m] = true
+	}
+	if len(seen) < 9 {
+		t.Fatalf("only %d distinct minis among %d users: %v", len(seen), len(names), seen)
+	}
+	// symmetric: cell 0 mirrors cell 2
+	g, _ := Grid("alice")
+	_ = g
+	r := []rune(Mini("alice"))
+	if len(r) != 3 || mirror(r[0]) != r[2] {
+		t.Fatalf("not left/right symmetric: %q", string(r))
+	}
+}
+
+func mirror(r rune) rune {
+	for l, rr := range map[rune]rune{'▘': '▝', '▝': '▘', '▖': '▗', '▗': '▖', '▌': '▐', '▐': '▌', '▞': '▚', '▚': '▞', '▛': '▜', '▜': '▛', '▙': '▟', '▟': '▙'} {
+		if l == r {
+			return rr
+		}
+	}
+	return r
+}
