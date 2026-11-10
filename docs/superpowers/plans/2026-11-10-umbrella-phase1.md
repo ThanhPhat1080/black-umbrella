@@ -37,11 +37,11 @@ HTTP JSON, errors are `{"error": "<code>"}`:
 Admin routes use `Authorization: Bearer <ADMIN_TOKEN>`. Reset invites are bound to the username (`invites.username`), plain invites have `username = NULL`.
 
 `User = {username, displayName, publicKey, joinedAt, online, lastSeen}` (times in ms, `lastSeen` null if never).
-`Message = {id, conv, sender, parentId, createdAt, kept, nonce, ct, key}` — `key` is the wrapped key for the receiving user only; `parentId` null for roots.
+`Message = {id, conv, sender, parentId, createdAt, kept, nonce, ct, senderKey, key}` — `key` is the wrapped key for the receiving user only; `senderKey` is the sender's public key (base64) at send time, stored server-side so messages stay readable after the sender re-registers (client falls back to the sender's current key when empty); `parentId` null for roots.
 
 WS client → server: `{t:"send", ref, conv, parentId?, nonce, ct, keys:{username: wrapped}}`, `{t:"keep", id, kept}`, `{t:"typing", conv}`, `{t:"name", displayName}`.
 WS server → client: `{t:"hello", me, users, messages}`, `{t:"msg", ref?, message}`, `{t:"kept", id, kept}`, `{t:"expired", ids}`, `{t:"typing", conv, username}`, `{t:"user", user}`, `{t:"error", ref?, error}`.
-Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's recipient set exactly (hell = all users having a public key; dm = both) else `error: recipients_mismatch`. Error codes for WS: `bad_conv`, `bad_parent`, `too_large` (`ct` > 24 000 chars), `not_owner`, `not_found`, `invalid_display_name`.
+Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's recipient set exactly (hell = all users having a public key; dm = both) else `error: recipients_mismatch`. Error codes for WS: `bad_conv`, `bad_parent`, `bad_request` (nonce must be exactly 32 base64 chars, each wrapped key exactly 96), `too_large` (`ct` > 32 768 chars), `not_owner`, `not_found`, `keep_limit` (max 200 kept messages per user), `invalid_display_name`. `admin reset` closes the user's sockets with close code 4001 and broadcasts a `user` update with an empty `publicKey`; DM recipients require a public key. Display names containing control characters are rejected (`invalid_display_name`).
 
 ## Review Focus
 
@@ -67,11 +67,11 @@ Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's r
 
 Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined_at, last_seen, fails, locks, locked_until)`, `invites(code PK, username NULL, created_at)`, `sessions(token_hash PK, username, expires_at)`, `messages(id PK, conv, sender, parent_id, created_at, kept, nonce, ct)`, `message_keys(message_id, username, wrapped, PK(message_id, username))`, indexes on `messages(conv)`, `messages(kept, created_at)`.
 
-- [ ] **Step 1:** Write `validate.test.ts`: `validUsername("ab")===false`, `("abc")`, `("a_1")` true, `("Abc")` false, 21 chars false; `validPin("123456")` true, `"12345"`, `"12345a"` false; `normalizeDisplayName("  Phát 🌂 ")==="Phát 🌂"`, 33 runes → null, `"   "` → null; `dmConv("b","a")==="dm:a|b"`; `parseConv("dm:a|a")===null`, `parseConv("hell")` → hell.
-- [ ] **Step 2:** `cd server && npx vitest run` → FAIL (module missing).
-- [ ] **Step 3:** Implement the above; `memorySql` wraps `node:sqlite` `DatabaseSync` (`prepare(q).all(...p)` for statements returning rows, `run` otherwise — detect by `stmt.columns().length`). `migrate` is idempotent (`CREATE … IF NOT EXISTS`). `wrangler.toml`: `main="src/index.ts"`, DO binding `HUB` class `HubDO`, migration `new_sqlite_classes=["HubDO"]`, `compatibility_date="2026-10-01"`.
-- [ ] **Step 4:** `npx vitest run` → PASS; `npx tsc --noEmit` → no errors.
-- [ ] **Step 5:** Commit `feat(server): scaffold, schema and validation`.
+- [x] **Step 1:** Write `validate.test.ts`: `validUsername("ab")===false`, `("abc")`, `("a_1")` true, `("Abc")` false, 21 chars false; `validPin("123456")` true, `"12345"`, `"12345a"` false; `normalizeDisplayName("  Phát 🌂 ")==="Phát 🌂"`, 33 runes → null, `"   "` → null; `dmConv("b","a")==="dm:a|b"`; `parseConv("dm:a|a")===null`, `parseConv("hell")` → hell.
+- [x] **Step 2:** `cd server && npx vitest run` → FAIL (module missing).
+- [x] **Step 3:** Implement the above; `memorySql` wraps `node:sqlite` `DatabaseSync` (`prepare(q).all(...p)` for statements returning rows, `run` otherwise — detect by `stmt.columns().length`). `migrate` is idempotent (`CREATE … IF NOT EXISTS`). `wrangler.toml`: `main="src/index.ts"`, DO binding `HUB` class `HubDO`, migration `new_sqlite_classes=["HubDO"]`, `compatibility_date="2026-10-01"`.
+- [x] **Step 4:** `npx vitest run` → PASS; `npx tsc --noEmit` → no errors.
+- [x] **Step 5:** Commit `feat(server): scaffold, schema and validation`.
 
 ### Task 2: Auth core — invites, register, login, lockout, sessions, admin
 
@@ -83,11 +83,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Task 1.
 - Produces: `class Auth { constructor(sql: Sql, now: () => number); createInvite(username?: string): string; register(b): Promise<{token, user}>; login(username, pin): Promise<string>; userForToken(token): string | null; reset(username): string; unlock(username): void }` throwing `ApiError(status, code, extra?)`; `handleHttp(req: Request, auth: Auth, adminToken: string): Promise<Response | null>` (null = not an auth route); `userView(row, online): User`.
 
-- [ ] **Step 1:** Tests (fake clock): register with valid invite → token; invite reused → 403 `invalid_invite`; duplicate username → 409; reset-bound invite only valid for its username and re-registration replaces key while keeping `joined_at`; login good PIN → token whose `userForToken` returns username; 5 bad PINs → 6th call 423 with `until = now+15min`, even with right PIN; after `until` passes, 5 more bad → `until = now+30min`; success resets `fails` and `locks`; `unlock` clears; expired session (now+7d+1) → null; `handleHttp` admin without bearer → 401, `/api/admin/invite` with bearer → `{code}`.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement. PBKDF2 via `crypto.subtle.deriveBits` (100 000, SHA-256, 256 bits); compare in constant time. Invite/token: 16 / 32 random bytes base64url. Store `sha256(token)` hex. Invite codes are consumed in the same call that creates the user.
-- [ ] **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit `feat(server): auth, lockout and admin endpoints`.
+- [x] **Step 1:** Tests (fake clock): register with valid invite → token; invite reused → 403 `invalid_invite`; duplicate username → 409; reset-bound invite only valid for its username and re-registration replaces key while keeping `joined_at`; login good PIN → token whose `userForToken` returns username; 5 bad PINs → 6th call 423 with `until = now+15min`, even with right PIN; after `until` passes, 5 more bad → `until = now+30min`; success resets `fails` and `locks`; `unlock` clears; expired session (now+7d+1) → null; `handleHttp` admin without bearer → 401, `/api/admin/invite` with bearer → `{code}`.
+- [x] **Step 2:** Run → FAIL.
+- [x] **Step 3:** Implement. PBKDF2 via `crypto.subtle.deriveBits` (100 000, SHA-256, 256 bits); compare in constant time. Invite/token: 16 / 32 random bytes base64url. Store `sha256(token)` hex. Invite codes are consumed in the same call that creates the user.
+- [x] **Step 4:** Run → PASS.
+- [x] **Step 5:** Commit `feat(server): auth, lockout and admin endpoints`.
+
+> **Deviation:** Added `server/src/sha256.ts` (sync SHA-256) because `Auth.userForToken` is specified sync but WebCrypto digest is async. 5th bad PIN returns 401; the lock is reported (423) from the 6th call on.
 
 ### Task 3: Realtime core — hello, send, keep, typing, name, presence, expiry
 
@@ -99,11 +101,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Tasks 1–2.
 - Produces: `interface Outbox { send(username: string, msg: object): void; online(): string[] }`; `class Core { constructor(sql, auth, out: Outbox, now); hello(username): object; onConnect(username, firstSocket: boolean): void; onDisconnect(username, lastSocket: boolean): void; onMessage(username, raw: string): void; sweep(): string[] }`; `const EXPIRY_MS = 86_400_000`.
 
-- [ ] **Step 1:** Tests with a recording `Outbox`: `hello` returns `me`, all users (online flags from `out.online()`), only messages where `message_keys` has a row for that user, each with its own `key`; `send` to hell with keys for all users → every user gets `{t:"msg"}` with their key and the sender's frame includes `ref`; keys missing a user → `error recipients_mismatch` to sender only; DM delivered only to the two participants; `parentId` of a reply or other conv → `bad_parent`; `keep` by non-sender → `not_owner`; keep → broadcast `kept` to recipients; `sweep` at createdAt+24h+1 deletes non-kept, keeps kept, returns ids and sends `expired`; unkeep of a 25 h old message deletes it immediately and sends `expired`; `typing` reaches conv participants except sender; `name` updates and broadcasts `user`; first connect / last disconnect broadcast `user` with online/lastSeen; registration broadcast (`Core.userJoined(username)`) sends `user` to all online.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement. Message id = `createdAt` base36 padded to 9 + 8 random hex chars (sortable). Delete `message_keys` with their message. Malformed JSON / unknown `t` → ignored.
-- [ ] **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit `feat(server): realtime core with expiry and keep`.
+- [x] **Step 1:** Tests with a recording `Outbox`: `hello` returns `me`, all users (online flags from `out.online()`), only messages where `message_keys` has a row for that user, each with its own `key`; `send` to hell with keys for all users → every user gets `{t:"msg"}` with their key and the sender's frame includes `ref`; keys missing a user → `error recipients_mismatch` to sender only; DM delivered only to the two participants; `parentId` of a reply or other conv → `bad_parent`; `keep` by non-sender → `not_owner`; keep → broadcast `kept` to recipients; `sweep` at createdAt+24h+1 deletes non-kept, keeps kept, returns ids and sends `expired`; unkeep of a 25 h old message deletes it immediately and sends `expired`; `typing` reaches conv participants except sender; `name` updates and broadcasts `user`; first connect / last disconnect broadcast `user` with online/lastSeen; registration broadcast (`Core.userJoined(username)`) sends `user` to all online.
+- [x] **Step 2:** Run → FAIL.
+- [x] **Step 3:** Implement. Message id = `createdAt` base36 padded to 9 + 8 random hex chars (sortable). Delete `message_keys` with their message. Malformed JSON / unknown `t` → ignored.
+- [x] **Step 4:** Run → PASS.
+- [x] **Step 5:** Commit `feat(server): realtime core with expiry and keep`.
+
+> **Deviation:** Tests and implementation were written together (no separate RED run for this task). `hello.me` is the username string. Expiry is inclusive (`created_at + 24h <= now`).
 
 ### Task 4: Durable Object + Worker wiring, local smoke
 
@@ -114,10 +118,12 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Tasks 1–3.
 - Produces: `export class HubDO extends DurableObject`, `export default { fetch }`.
 
-- [ ] **Step 1:** `HubDO`: `sql` adapter over `ctx.storage.sql.exec(q, ...p).toArray()`; `migrate` in constructor via `blockConcurrencyWhile`; `/api/ws` validates token, `ctx.acceptWebSocket(server, [username])`, sends `hello`; `webSocketMessage/Close/Error` route to `Core` using `ctx.getTags(ws)[0]`; `Outbox.send` iterates `ctx.getWebSockets(username)`; alarm runs `sweep()` and reschedules `+5 min` (set on first request if none). After successful register, call `core.userJoined`.
-- [ ] **Step 2:** Worker `fetch` forwards to `env.HUB.get(env.HUB.idFromName("hub"))`.
-- [ ] **Step 3:** Verify: `npx wrangler dev --port 8787` with `.dev.vars` `ADMIN_TOKEN=dev`; `curl -XPOST -H 'Authorization: Bearer dev' localhost:8787/api/admin/invite` → `{"code":…}`; `npx tsc --noEmit` clean.
-- [ ] **Step 4:** Commit `feat(server): durable object hub and worker`.
+- [x] **Step 1:** `HubDO`: `sql` adapter over `ctx.storage.sql.exec(q, ...p).toArray()`; `migrate` in constructor via `blockConcurrencyWhile`; `/api/ws` validates token, `ctx.acceptWebSocket(server, [username])`, sends `hello`; `webSocketMessage/Close/Error` route to `Core` using `ctx.getTags(ws)[0]`; `Outbox.send` iterates `ctx.getWebSockets(username)`; alarm runs `sweep()` and reschedules `+5 min` (set on first request if none). After successful register, call `core.userJoined`.
+- [x] **Step 2:** Worker `fetch` forwards to `env.HUB.get(env.HUB.idFromName("hub"))`.
+- [x] **Step 3:** Verify: `npx wrangler dev --port 8787` with `.dev.vars` `ADMIN_TOKEN=dev`; `curl -XPOST -H 'Authorization: Bearer dev' localhost:8787/api/admin/invite` → `{"code":…}`; `npx tsc --noEmit` clean.
+- [x] **Step 4:** Commit `feat(server): durable object hub and worker`.
+
+> **Deviation:** Used `--local --persist-to` in verification; upgrade helper named `upgrade` (DurableObject base class already defines `connect`).
 
 ## Client (`client/`)
 
@@ -130,11 +136,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `type KeyPair struct{ Public, Private [32]byte }`; `GenerateKeyPair() (KeyPair, error)`; `type Sealed struct{ Nonce, CT string; Keys map[string]string }` (base64 std); `Seal(text string, sender KeyPair, recipients map[string][32]byte) (Sealed, error)`; `Open(nonce, ct, wrappedKey string, me KeyPair, senderPub [32]byte) (string, error)`; `ErrDecrypt`.
 
-- [ ] **Step 1:** Tests: round-trip for 3 recipients each opening their own key; `Open` with wrong sender pub → `ErrDecrypt`; tampered ct → `ErrDecrypt`; Vietnamese text `"Tiếng Việt có dấu ạ ( ˘ ³˘)♥"` round-trips byte-exact.
-- [ ] **Step 2:** `cd client && go test ./internal/e2e/` → FAIL.
-- [ ] **Step 3:** Implement per spec §3 (payload JSON `{"text":…}`).
-- [ ] **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): e2e envelope`.
+- [x] **Step 1:** Tests: round-trip for 3 recipients each opening their own key; `Open` with wrong sender pub → `ErrDecrypt`; tampered ct → `ErrDecrypt`; Vietnamese text `"Tiếng Việt có dấu ạ ( ˘ ³˘)♥"` round-trips byte-exact.
+- [x] **Step 2:** `cd client && go test ./internal/e2e/` → FAIL.
+- [x] **Step 3:** Implement per spec §3 (payload JSON `{"text":…}`).
+- [x] **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): e2e envelope`.
+
+> **Deviation:** go.mod pinned to go 1.24 and golang.org/x/crypto v0.41.0 (latest x/crypto requires Go 1.26; use GOTOOLCHAIN=local).
 
 ### Task 6: Key store + config paths
 
@@ -145,9 +153,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `Dir() (string, error)` (honours `UMBRELLA_HOME` env for tests); `type KeyFile struct{ Username, Server, PublicKey, Salt, Nonce, Box string }`; `SaveKey(path, username, server, pin string, kp e2e.KeyPair) error`; `LoadKey(path, pin string) (KeyFile, e2e.KeyPair, error)`; `ErrWrongPIN`; `ExportKey(src, dst string) error`.
 
-- [ ] **Step 1:** Tests: save/load round trip; wrong PIN → `ErrWrongPIN`; file mode `0600` (skip on windows); export copies bytes exactly. Use Argon2 params overridable via package var for test speed but assert defaults equal the Global Constraints.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): pin-encrypted key store`.
+- [x] **Step 1:** Tests: save/load round trip; wrong PIN → `ErrWrongPIN`; file mode `0600` (skip on windows); export copies bytes exactly. Use Argon2 params overridable via package var for test speed but assert defaults equal the Global Constraints.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): pin-encrypted key store`.
 
 ### Task 7: API client (HTTP + WebSocket) and protocol types
 
@@ -158,9 +166,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `proto.User`, `proto.Message`, `proto.Event{T string; Me string; Users []User; Messages []Message; Message *Message; Ref, ID, Conv, Username, Error string; Kept bool; IDs []string; User *User; Until int64}`, outbound structs `Send`, `Keep`, `Typing`, `Name`; `type Client struct{ BaseURL string; HTTP *http.Client }`; `Register(ctx, RegisterReq) (token string, err error)`; `Login(ctx, user, pin) (string, error)`; `AdminInvite/AdminReset/AdminUnlock(ctx, adminToken, …)`; `type APIError struct{ Status int; Code string; Until int64 }`; `Dial(ctx, baseURL, token) (*Conn, error)` with `Conn.Events() <-chan proto.Event`, `Conn.Send(v any) error`, `Conn.Close()`.
 
-- [ ] **Step 1:** Tests: Login 423 → `*APIError{Status:423, Code:"locked", Until:…}`; Register posts exact JSON field names from the wire table; ws URL derived `https→wss`, `http→ws`.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): api client`.
+- [x] **Step 1:** Tests: Login 423 → `*APIError{Status:423, Code:"locked", Until:…}`; Register posts exact JSON field names from the wire table; ws URL derived `https→wss`, `http→ws`.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): api client`.
 
 ### Task 8: Chat state model (pure)
 
@@ -172,9 +180,11 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: `proto`, `e2e`.
 - Produces: `type Msg struct{ ID, Conv, Sender, ParentID, Text string; CreatedAt time.Time; Kept, Undecryptable bool; Replies int }`; `type State struct{…}`; `New(me string, kp e2e.KeyPair) *State`; `(*State) Apply(ev proto.Event) (Effects)` where `Effects{ Bell bool }`; `Timeline(conv) []Msg` (roots only, oldest first); `Thread(rootID) (root *Msg, replies []Msg)` (root nil-safe → placeholder `Msg{Text:"[message expired]"}`); `Sidebar() []Entry{Conv, Label, Username string; Online bool; Unread int}` (hell first, then online, then alpha); `SetActive(conv)` clears unread; `Recipients(conv) map[string][32]byte`; `Typing(conv, now) []string`; `Users() map[string]proto.User`; `Mentions(text, me) bool`.
 
-- [ ] **Step 1:** Tests: `hello` replaces state (applying twice → no duplicates); `msg` in inactive conv increments unread; `@me` in hell → `Bell` and unread; `expired` removes messages and decrements root reply counts; reply whose root missing → `Thread` returns placeholder root; `kept` toggles; sidebar ordering (`hell`, online `bob`, online `zed`, offline `amy`); typing entry disappears after 4 s; `Recipients("hell")` = all users with keys; DM conv for me+bob is `dm:bob|me` sorted.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): chat state model`.
+- [x] **Step 1:** Tests: `hello` replaces state (applying twice → no duplicates); `msg` in inactive conv increments unread; `@me` in hell → `Bell` and unread; `expired` removes messages and decrements root reply counts; reply whose root missing → `Thread` returns placeholder root; `kept` toggles; sidebar ordering (`hell`, online `bob`, online `zed`, offline `amy`); typing entry disappears after 4 s; `Recipients("hell")` = all users with keys; DM conv for me+bob is `dm:bob|me` sorted.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): chat state model`.
+
+> **Deviation:** Orphan replies (root expired) are included in Timeline so they remain reachable; Thread never returns a nil root. Typing/Mentions as specified.
 
 ### Task 9: Avatar, links, kaomoji, clipboard
 
@@ -185,9 +195,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `avatar.Grid(username) (grid [5][5]bool, color string)` (hex `#rrggbb`); `avatar.Render(username) []string` (3 lines, each 10 cells wide); `avatar.Dot(username) string` (coloured `■`); `links.Find(text) []string`; `kaomoji.All []string` (exactly 50, unique); `clip.Copy(s string) error` (atotto, fallback OSC 52 to stdout).
 
-- [ ] **Step 1:** Tests: grid deterministic and column-symmetric (`g[r][c]==g[r][4-c]`); `Render` returns 3 lines of display width 10; `links.Find("xem https://a.b/c?d=1, và http://x.y")` → both URLs without trailing comma; `len(kaomoji.All)==50` and unique.
-- [ ] **Step 2:** FAIL. **Step 3:** implement (half-block rows: pair rows (0,1),(2,3),(4,—)). **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): avatar, links, kaomoji, clipboard`.
+- [x] **Step 1:** Tests: grid deterministic and column-symmetric (`g[r][c]==g[r][4-c]`); `Render` returns 3 lines of display width 10; `links.Find("xem https://a.b/c?d=1, và http://x.y")` → both URLs without trailing comma; `len(kaomoji.All)==50` and unique.
+- [x] **Step 2:** FAIL. **Step 3:** implement (half-block rows: pair rows (0,1),(2,3),(4,—)). **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): avatar, links, kaomoji, clipboard`.
 
 ### Task 10: TUI
 
@@ -201,9 +211,11 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 
 Behaviour (spec §4–5): layout sidebar(24) | chat | thread(40% when open); bubbles `textarea` (Enter sends, Alt+Enter newline, 4000-rune limit shown as counter); `/i` or click `+` → kaomoji picker overlay (arrows + Enter → insert at cursor + `clip.Copy`); `/whois @u`, clicking a user's avatar → profile overlay; `/name x` → `Name`; message line `■ Name  hh:mm  text  [📋][⚓][💬 N]` with zones via bubblezone; keybindings per spec; typing events throttled 2 s; on `recipients_mismatch` resend once after next `user` event; on connection loss → status bar `Reconnecting…` and `reconnect` with backoff 1,2,4…30 s; terminal bell via `\a` when `Effects.Bell`.
 
-- [ ] **Step 1:** Tests on pure render helpers: `renderMessage` includes `📋` iff message has a link and `⚓` styled when kept; long Vietnamese line wraps at width without splitting runes (`runewidth.StringWidth` of each line ≤ width); thread view with nil root shows `[message expired]`.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS; `go vet ./...` clean.
-- [ ] **Step 5:** Commit `feat(client): terminal UI`.
+- [x] **Step 1:** Tests on pure render helpers: `renderMessage` includes `📋` iff message has a link and `⚓` styled when kept; long Vietnamese line wraps at width without splitting runes (`runewidth.StringWidth` of each line ≤ width); thread view with nil root shows `[message expired]`.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS; `go vet ./...` clean.
+- [x] **Step 5:** Commit `feat(client): terminal UI`.
+
+> **Deviation:** Message buttons are appended to the last body line (header line is '■ Name hh:mm'); the TUI depends on a small `link` interface (satisfied by *api.Conn) for testability; on recipients_mismatch with an unchanged user list the client closes the socket to force a fresh hello and retries once (no REST user list exists). Orphan replies are shown in the timeline (see Task 8). bubblezone v1.0.0 / bubbletea v1.3.10 / lipgloss v1.1.0.
 
 ### Task 11: CLI commands
 
@@ -215,16 +227,18 @@ Behaviour (spec §4–5): layout sidebar(24) | chat | thread(40% when open); bub
 
 Commands: `umbrella` (chat; PIN prompt hidden via `golang.org/x/term`), `umbrella register` (prompts invite, username, display name, PIN twice; generates key; saves key file; refuses to overwrite an existing key file without `--force`), `umbrella export-key <file>`, `umbrella admin invite|reset <user>|unlock <user>` (admin token from `UMBRELLA_ADMIN_TOKEN` or prompt). Global flag `--server`. Wrong local PIN → `Wrong PIN.` exit 1 without network; 423 → `Account locked until 15:04.`
 
-- [ ] **Step 1:** `go build ./... && go vet ./...` clean; `./umbrella --help` lists the commands.
-- [ ] **Step 2:** Commit `feat(client): cli commands`.
+- [x] **Step 1:** `go build ./... && go vet ./...` clean; `./umbrella --help` lists the commands.
+- [x] **Step 2:** Commit `feat(client): cli commands`.
 
 ### Task 12: End-to-end test, build script, README
 
 **Files:**
 - Create: `client/e2e_test/e2e_test.go` (build tag `e2e`), `scripts/e2e.sh`, `scripts/build.sh`, `README.md`, `.gitignore`
 
-- [ ] **Step 1:** `e2e_test.go` (env `UMBRELLA_E2E_SERVER`): admin invite ×2 → register alice & bob → both dial → alice sends to hell → bob decrypts the text; bob replies in thread; alice keeps; DM alice→bob not visible to a third user carol registered after.
-- [ ] **Step 2:** `scripts/e2e.sh` starts `wrangler dev` with a temp persist dir, waits for port, runs `go test -tags e2e ./e2e_test/`, kills server. Run → PASS.
-- [ ] **Step 3:** `scripts/build.sh <server-url>` → `dist/umbrella-{darwin,linux}-{amd64,arm64}`, `dist/umbrella-windows-amd64.exe`.
-- [ ] **Step 4:** README: deploy (`wrangler login`, `wrangler secret put ADMIN_TOKEN`, `wrangler deploy`), build, onboarding (admin invite → register), key bindings, security model & its limits (trusted key distribution, no forward secrecy, 6-digit PIN key file is brute-forceable if stolen).
-- [ ] **Step 5:** Commit `chore: e2e test, build script, readme`; push branch.
+- [x] **Step 1:** `e2e_test.go` (env `UMBRELLA_E2E_SERVER`): admin invite ×2 → register alice & bob → both dial → alice sends to hell → bob decrypts the text; bob replies in thread; alice keeps; DM alice→bob not visible to a third user carol registered after.
+- [x] **Step 2:** `scripts/e2e.sh` starts `wrangler dev` with a temp persist dir, waits for port, runs `go test -tags e2e ./e2e_test/`, kills server. Run → PASS.
+- [x] **Step 3:** `scripts/build.sh <server-url>` → `dist/umbrella-{darwin,linux}-{amd64,arm64}`, `dist/umbrella-windows-amd64.exe`.
+- [x] **Step 4:** README: deploy (`wrangler login`, `wrangler secret put ADMIN_TOKEN`, `wrangler deploy`), build, onboarding (admin invite → register), key bindings, security model & its limits (trusted key distribution, no forward secrecy, 6-digit PIN key file is brute-forceable if stolen).
+- [x] **Step 5:** Commit `chore: e2e test, build script, readme`; push branch.
+
+> **Deviation:** Commit for Task 11 initially omitted client/cmd because of an over-broad .gitignore entry; fixed in a follow-up commit. Added CLI tests (client/cmd/umbrella/main_test.go) for local wrong-PIN handling. e2e test additionally covers the recipients_mismatch flow, lockout and reconnect-hello dedupe.

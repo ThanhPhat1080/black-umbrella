@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.dev.vars
+.wrangler/
+.superpowers/
+/client/umbrella
+*.test
+.env
