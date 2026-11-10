@@ -514,6 +514,15 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if s == keyEnter {
 		return m, m.submit()
 	}
+	if s == keyUp && (m.input.Value() == "" || m.input.Line() == 0) {
+		// Up from the input moves to the message list, selecting the newest message.
+		if n := len(m.st.Timeline(m.st.Active())); n > 0 {
+			m.pane = paneMain
+			m.input.Blur()
+			m.selMain = n - 1
+			return m, nil
+		}
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(k)
 	if v := m.input.Value(); v != "" && !strings.HasPrefix(v, "/") && time.Since(m.lastTyping) >= typingEvery {

@@ -262,7 +262,7 @@ func (s *State) Find(id string) (Msg, bool) {
 }
 
 func (s *State) Sidebar() []Entry {
-	out := []Entry{{Conv: "hell", Label: "Hell", Unread: s.unread["hell"]}}
+	out := []Entry{{Conv: "hell", Label: "Hell room", Unread: s.unread["hell"]}}
 	var us []proto.User
 	for _, u := range s.users {
 		if u.Username != s.me {

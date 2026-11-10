@@ -184,10 +184,15 @@ func renderMessage(m chat.Msg, v msgView) []string {
 	if len(links.Find(m.Text)) > 0 {
 		btns = append(btns, zone.Mark("copy:"+m.ID, "[📋]"))
 	}
-	if m.Kept {
-		btns = append(btns, zone.Mark("keep:"+m.ID, keptStyle.Render("[⚓]")))
-	} else {
-		btns = append(btns, zone.Mark("keep:"+m.ID, dim.Render("[⚓]")))
+	switch {
+	case v.Me != "" && m.Sender == v.Me: // only the sender can keep: a real button
+		if m.Kept {
+			btns = append(btns, zone.Mark("keep:"+m.ID, keptStyle.Render("[⚓]")))
+		} else {
+			btns = append(btns, zone.Mark("keep:"+m.ID, dim.Render("[⚓]")))
+		}
+	case m.Kept: // someone else's kept message: a marker, not a button
+		btns = append(btns, keptStyle.Render("⚓"))
 	}
 	if !v.InThread {
 		label := "[💬]"
@@ -303,6 +308,38 @@ func cut(s string, w int) string {
 	return out.String()
 }
 
+// sliceCells returns the part of s covering display cells [from, to). Cuts happen on rune
+// boundaries (a wide rune straddling an edge becomes a space); escape sequences are kept so
+// styles still open and close correctly.
+func sliceCells(s string, from, to int) string {
+	var out strings.Builder
+	col := 0
+	emit := func(text string) {
+		for _, r := range text {
+			rw := runewidth.RuneWidth(r)
+			switch {
+			case rw == 0:
+				if col > from && col <= to {
+					out.WriteRune(r) // combining mark: stays with its base
+				}
+			case col >= from && col+rw <= to:
+				out.WriteRune(r)
+			case col+rw > from && col < to: // straddles an edge
+				out.WriteString(strings.Repeat(" ", minInt(col+rw, to)-maxInt(col, from)))
+			}
+			col += rw
+		}
+	}
+	pos := 0
+	for _, loc := range escSeqRe.FindAllStringIndex(s, -1) {
+		emit(s[pos:loc[0]])
+		out.WriteString(s[loc[0]:loc[1]])
+		pos = loc[1]
+	}
+	emit(s[pos:])
+	return out.String()
+}
+
 func padTo(s string, w int) string {
 	s = cut(s, w)
 	return s + strings.Repeat(" ", maxInt(0, w-width(s)))
@@ -340,7 +377,7 @@ func (m *Model) nameOf(u string) string { return m.st.DisplayName(u) }
 
 func (m *Model) convTitle(conv string) string {
 	if conv == "hell" {
-		return "# Hell"
+		return "# Hell room"
 	}
 	for _, e := range m.st.Sidebar() {
 		if e.Conv == conv {
@@ -365,9 +402,9 @@ func (m *Model) viewSidebar(w, h int) string {
 		}
 		mark := func(i int, s string) string { return zone.Mark(fmt.Sprintf("side:%s:%d", e.Conv, i), s) }
 		if e.Conv == "hell" {
-			label := nameSt.Render("# Hell")
+			label := nameSt.Render("# Hell room")
 			if e.Conv == active {
-				label = accent.Render("# Hell")
+				label = accent.Render("# Hell room")
 			}
 			blocks = append(blocks, []string{mark(0, label+badge)})
 			continue
@@ -545,11 +582,11 @@ func (m *Model) viewStatus() string {
 	return fit([]string{left + right}, m.w, 1)
 }
 
-func (m *Model) overlayView() string {
+func (m *Model) overlayView() []string {
 	var lines []string
 	switch m.overlay {
 	case overlayPicker:
-		const cell = 17
+		cell := minInt(17, maxInt(8, (m.w-8)/pickerCols))
 		lines = append(lines, nameSt.Render("Kaomoji")+dim.Render("  arrows + Enter to insert (also copies), Esc to cancel"), "")
 		for r := 0; r*pickerCols < len(kaomoji.All); r++ {
 			var sb strings.Builder
@@ -569,7 +606,7 @@ func (m *Model) overlayView() string {
 	case overlayProfile:
 		u, ok := m.st.Users()[m.profileUser]
 		if !ok {
-			return ""
+			return nil
 		}
 		col := lipgloss.NewStyle().Foreground(lipgloss.Color(avatar.Color(u.Username)))
 		for _, l := range avatar.Render(u.Username) {
@@ -587,54 +624,66 @@ func (m *Model) overlayView() string {
 	}
 	inner := 0
 	for _, l := range lines {
-		inner = maxInt(inner, width(l))
+		inner = maxInt(inner, width(l)+2)
 	}
-	inner = minInt(inner, maxInt(1, m.w-6))
-	fitted := make([]string, len(lines)+2)
-	copy(fitted[1:], lines)
-	boxed := strings.Split(paneBox(fit(fitted, inner+2, len(fitted)), inner+2, true), "\n")
-	if len(boxed) > m.h {
-		boxed = boxed[:m.h]
+	inner = minInt(inner, maxInt(3, m.w-6))
+	padded := make([]string, len(lines)+2)
+	for i, l := range lines {
+		padded[i+1] = " " + l
 	}
-	top := (m.h - len(boxed)) / 2
-	left := strings.Repeat(" ", maxInt(0, (m.w-width(boxed[0]))/2))
-	out := make([]string, 0, m.h)
-	for i := 0; i < top; i++ {
-		out = append(out, "")
+	return strings.Split(paneBox(fit(padded, inner, len(padded)), inner, true), "\n")
+}
+
+// overlayOn draws box centred over the background lines, cell-accurately: whatever is outside
+// the box's columns stays visible.
+func overlayOn(bg, box []string, w, h int) []string {
+	for len(bg) < h {
+		bg = append(bg, "")
 	}
-	for _, l := range boxed {
-		out = append(out, left+l)
+	if len(box) > h {
+		box = box[:h]
 	}
-	return strings.Join(out, "\n")
+	bw := 0
+	for _, l := range box {
+		bw = maxInt(bw, width(l))
+	}
+	left, top := maxInt(0, (w-bw)/2), maxInt(0, (h-len(box))/2)
+	out := append([]string(nil), bg...)
+	for i, l := range box {
+		row := padTo(bg[top+i], w)
+		out[top+i] = sliceCells(row, 0, left) + padTo(l, bw) + sliceCells(row, left+bw, w)
+	}
+	return out
 }
 
 func (m *Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
 	}
-	var body string
+	sideW, chatW, threadW := m.layout()
+	ph := m.h - 1
+	var cols []string
+	if sideW > 0 {
+		cols = append(cols, m.viewSidebar(sideW, ph))
+	}
+	cols = append(cols, m.viewChat(chatW, ph))
+	if threadW > 0 {
+		cols = append(cols, m.viewThread(threadW, ph))
+	}
+	lines := strings.Split(joinCols(cols)+"\n"+m.viewStatus(), "\n")
 	if m.overlay != overlayNone {
-		body = m.overlayView()
-	} else {
-		sideW, chatW, threadW := m.layout()
-		ph := m.h - 1
-		var cols []string
-		if sideW > 0 {
-			cols = append(cols, m.viewSidebar(sideW, ph))
+		if box := m.overlayView(); box != nil {
+			lines = overlayOn(lines, box, m.w, m.h)
 		}
-		cols = append(cols, m.viewChat(chatW, ph))
-		if threadW > 0 {
-			cols = append(cols, m.viewThread(threadW, ph))
-		}
-		body = joinCols(cols) + "\n" + m.viewStatus()
 	}
-	// Safety net: whatever happened above, no line may exceed the terminal width or height.
-	lines := strings.Split(zone.Scan(body), "\n")
-	if len(lines) > m.h {
-		lines = lines[:m.h]
+	lines = strings.Split(zone.Scan(strings.Join(lines, "\n")), "\n")
+	// Safety net: exactly h lines of exactly w cells, cut and padded by display width.
+	for len(lines) < m.h {
+		lines = append(lines, "")
 	}
+	lines = lines[:m.h]
 	for i, l := range lines {
-		lines[i] = cut(l, m.w)
+		lines[i] = padTo(l, m.w)
 	}
 	return strings.Join(lines, "\n")
 }

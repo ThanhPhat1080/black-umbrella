@@ -44,7 +44,7 @@ func TestKeptAnchorStyled(t *testing.T) {
 	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.ANSI256)
 	defer lipgloss.SetColorProfile(old)
-	v := msgView{Name: "Bob", Width: 60}
+	v := msgView{Name: "Bob", Me: "bob", Width: 60}
 	plain := msg("hi")
 	kept := msg("hi")
 	kept.Kept = true
@@ -454,5 +454,131 @@ func TestReconnectGivesUpOnAuthFailures(t *testing.T) {
 		if !strings.Contains(m.fatal, want) || m.reconnecting {
 			t.Fatalf("%s: fatal=%q", code, m.fatal)
 		}
+	}
+}
+
+func TestOverlayCompositesByCellsOverBackground(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor) // real terminals emit styles; so must the test
+	defer lipgloss.SetColorProfile(old)
+	m, me, bob := newTestModel(t)
+	pm := sealedMsg(t, bob, me, "bob", "a", "hell", "", "(☞ﾟヮﾟ)☞ Tiếng Việt")
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	for _, size := range [][2]int{{120, 35}, {80, 24}} {
+		w, h := size[0], size[1]
+		m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+		m.overlay = overlayNone
+		bg := strings.Split(m.View(), "\n")
+		for _, ov := range []overlay{overlayPicker, overlayProfile} {
+			m.overlay, m.pickIdx, m.profileUser = ov, 3, "bob"
+			lines := strings.Split(m.View(), "\n")
+			if len(lines) != h {
+				t.Fatalf("%dx%d ov=%d: %d lines", w, h, ov, len(lines))
+			}
+			boxRows := 0
+			for i, l := range lines {
+				if strings.ContainsRune(l, '\uFFFD') {
+					t.Fatalf("%dx%d ov=%d row %d has U+FFFD: %q", w, h, ov, i, l)
+				}
+				if rw := runewidth.StringWidth(ansi.Strip(l)); rw != w {
+					t.Fatalf("%dx%d ov=%d row %d width %d != %d: %q", w, h, ov, i, rw, w, l)
+				}
+				// outside the box the background must still be there (first two cells = sidebar edge)
+				if ansi.Strip(sliceCells(l, 0, 2)) != ansi.Strip(sliceCells(bg[i], 0, 2)) {
+					t.Fatalf("%dx%d ov=%d row %d lost background: %q vs %q", w, h, ov, i, sliceCells(l, 0, 2), sliceCells(bg[i], 0, 2))
+				}
+				plain := ansi.Strip(l)
+				if strings.ContainsRune(plain, '╭') {
+					if i > 1 { // rows 0/1 hold the sidebar/chat borders themselves
+						boxRows++
+						if !strings.Contains(plain[strings.IndexRune(plain, '╭'):], "╮") {
+							t.Fatalf("%dx%d ov=%d: box top missing ╮: %q", w, h, ov, plain)
+						}
+					}
+				}
+			}
+			if ov == overlayPicker {
+				found := false
+				for _, l := range lines {
+					p := ansi.Strip(l)
+					if i := strings.Index(p, "╭──"); i >= 0 && i > 1 && strings.Contains(p[i:], "╮") && !strings.Contains(p, "Hell") {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("%dx%d: no picker top border with both corners", w, h)
+				}
+			}
+		}
+		m.overlay = overlayNone
+	}
+}
+
+func TestSliceCells(t *testing.T) {
+	cases := []struct {
+		in       string
+		from, to int
+		want     string
+	}{
+		{"abcdef", 1, 4, "bcd"},
+		{"日本語", 0, 3, "日 "},
+		{"日本語", 1, 4, " 本"},
+		{"\x1b[31mred\x1b[0m", 1, 3, "\x1b[31med\x1b[0m"},
+		{"ab", 0, 10, "ab"},
+	}
+	for _, c := range cases {
+		if got := sliceCells(c.in, c.from, c.to); got != c.want {
+			t.Errorf("sliceCells(%q,%d,%d) = %q want %q", c.in, c.from, c.to, got, c.want)
+		}
+	}
+}
+
+func TestUpFromInputSelectsLastMessage(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	for i, txt := range []string{"one", "two"} {
+		pm := sealedMsg(t, bob, me, "bob", string(rune('a'+i)), "hell", "", txt)
+		m.onEvent(proto.Event{T: "msg", Message: &pm})
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m.pane != paneMain || m.selMain != 1 {
+		t.Fatalf("pane=%v sel=%d", m.pane, m.selMain)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if m.threadRoot != "b" || m.input.Value() != "" {
+		t.Fatalf("thread=%q input=%q", m.threadRoot, m.input.Value())
+	}
+	// text on the first line: Up still leaves the input; on a later line it moves the cursor
+	m2, _, _ := newTestModel(t)
+	m2.conn = &fakeLink{}
+	m2.input.SetValue("one\ntwo")
+	m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if m2.pane != paneInput {
+		t.Fatal("cursor on line 2: Up must stay in the textarea")
+	}
+}
+
+func TestAnchorOnlyOnOwnMessages(t *testing.T) {
+	v := msgView{Name: "Alice", Me: "bob", Width: 60}
+	other := msg("hi") // sender bob? use alice
+	other.Sender = "alice"
+	if got := strings.Join(renderMessage(other, v), "\n"); strings.Contains(got, "⚓") {
+		t.Fatalf("anchor shown on someone else's unkept message:\n%s", got)
+	}
+	other.Kept = true
+	got := zone.Scan(strings.Join(renderMessage(other, v), "\n"))
+	if !strings.Contains(got, "⚓") || strings.Contains(got, "[⚓]") {
+		t.Fatalf("kept marker on others' message should be plain ⚓ without a button:\n%s", got)
+	}
+	mine := msg("hi")
+	mine.Sender = "bob"
+	if got := strings.Join(renderMessage(mine, v), "\n"); !strings.Contains(got, "[⚓]") {
+		t.Fatalf("own message needs the anchor button:\n%s", got)
+	}
+}
+
+func TestHellRoomLabel(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	if v := m.View(); strings.Count(v, "Hell room") < 2 {
+		t.Fatalf("sidebar and header should both say Hell room:\n%s", v)
 	}
 }
