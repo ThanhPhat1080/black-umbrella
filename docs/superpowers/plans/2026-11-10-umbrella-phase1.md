@@ -136,11 +136,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `type KeyPair struct{ Public, Private [32]byte }`; `GenerateKeyPair() (KeyPair, error)`; `type Sealed struct{ Nonce, CT string; Keys map[string]string }` (base64 std); `Seal(text string, sender KeyPair, recipients map[string][32]byte) (Sealed, error)`; `Open(nonce, ct, wrappedKey string, me KeyPair, senderPub [32]byte) (string, error)`; `ErrDecrypt`.
 
-- [ ] **Step 1:** Tests: round-trip for 3 recipients each opening their own key; `Open` with wrong sender pub → `ErrDecrypt`; tampered ct → `ErrDecrypt`; Vietnamese text `"Tiếng Việt có dấu ạ ( ˘ ³˘)♥"` round-trips byte-exact.
-- [ ] **Step 2:** `cd client && go test ./internal/e2e/` → FAIL.
-- [ ] **Step 3:** Implement per spec §3 (payload JSON `{"text":…}`).
-- [ ] **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): e2e envelope`.
+- [x] **Step 1:** Tests: round-trip for 3 recipients each opening their own key; `Open` with wrong sender pub → `ErrDecrypt`; tampered ct → `ErrDecrypt`; Vietnamese text `"Tiếng Việt có dấu ạ ( ˘ ³˘)♥"` round-trips byte-exact.
+- [x] **Step 2:** `cd client && go test ./internal/e2e/` → FAIL.
+- [x] **Step 3:** Implement per spec §3 (payload JSON `{"text":…}`).
+- [x] **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): e2e envelope`.
+
+> **Deviation:** go.mod pinned to go 1.24 and golang.org/x/crypto v0.41.0 (latest x/crypto requires Go 1.26; use GOTOOLCHAIN=local).
 
 ### Task 6: Key store + config paths
 
@@ -151,9 +153,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `Dir() (string, error)` (honours `UMBRELLA_HOME` env for tests); `type KeyFile struct{ Username, Server, PublicKey, Salt, Nonce, Box string }`; `SaveKey(path, username, server, pin string, kp e2e.KeyPair) error`; `LoadKey(path, pin string) (KeyFile, e2e.KeyPair, error)`; `ErrWrongPIN`; `ExportKey(src, dst string) error`.
 
-- [ ] **Step 1:** Tests: save/load round trip; wrong PIN → `ErrWrongPIN`; file mode `0600` (skip on windows); export copies bytes exactly. Use Argon2 params overridable via package var for test speed but assert defaults equal the Global Constraints.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): pin-encrypted key store`.
+- [x] **Step 1:** Tests: save/load round trip; wrong PIN → `ErrWrongPIN`; file mode `0600` (skip on windows); export copies bytes exactly. Use Argon2 params overridable via package var for test speed but assert defaults equal the Global Constraints.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): pin-encrypted key store`.
 
 ### Task 7: API client (HTTP + WebSocket) and protocol types
 
