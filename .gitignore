@@ -3,5 +3,5 @@ dist/
 .dev.vars
 .wrangler/
 .superpowers/
-umbrella
+/client/umbrella
 *.test
