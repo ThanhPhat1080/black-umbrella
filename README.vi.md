@@ -90,6 +90,31 @@ Kiểm tra:
 umbrella --help
 ```
 
+### Cập nhật lên bản mới
+
+Key và dữ liệu đăng nhập nằm riêng trong `~/.umbrella/` (Windows: `%APPDATA%\umbrella\`), nên cập nhật chỉ là thay file chương trình, **không cần đăng ký lại**. Thoát Umbrella (`Ctrl+C`) trước khi cập nhật. Tải bản mới nhất ở trang **[Releases](https://github.com/ThanhPhat1080/black-umbrella/releases/latest)**.
+
+**macOS** (Mac Intel thì thay `arm64` bằng `amd64`):
+
+```bash
+sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella
+```
+```bash
+sudo chmod +x /usr/local/bin/umbrella
+```
+```bash
+sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella
+```
+
+**Windows (PowerShell):**
+
+```powershell
+Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"
+```
+
+Nếu Windows báo file đang được sử dụng, hãy đóng mọi cửa sổ đang chạy `umbrella` rồi chạy lại lệnh. Không cần chạy lại bước thêm `Path`.
+
+
 ## 2. Đăng ký tài khoản
 
 Bạn cần một **mã mời (invite code)** do Admin gửi. Mỗi mã chỉ dùng được 1 lần.
@@ -164,6 +189,8 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `o` | mở link trong tin đang chọn bằng trình duyệt (click thẳng vào link cũng mở) |
 | `y` | copy link trong tin đang chọn |
 | `c` | copy nội dung tin đang chọn |
+| Kéo chuột | bôi đen text trong một khung, thả chuột là tự copy vào clipboard |
+| `/h` | hiện toàn bộ phím tắt |
 | `Ctrl+X` | bật/tắt chế độ bôi đen để copy (tắt chuột của app, dùng bôi đen của terminal) |
 | `a` | bật/tắt ⚓ keep (chỉ với tin của bạn) |
 | `r` | mở thread của tin đang chọn |
@@ -171,6 +198,8 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `←` hoặc `Esc` | đóng thread, quay về danh sách tin với tin đó vẫn đang được chọn |
 | `Esc` | (khi không mở thread) đóng bảng kaomoji / profile, quay về ô nhập |
 | `Ctrl+C` | thoát |
+
+Soạn tin trong ô nhập: `Ctrl+←/→` hoặc `Option+←/→` nhảy theo từ, `Home`/`End` (hoặc `Ctrl+E` về cuối dòng; trên macOS `Ctrl+A` về đầu dòng) về đầu/cuối dòng, `Ctrl+W` xoá một từ, `Ctrl+U` xoá đến đầu dòng, **`Ctrl+L`** (hoặc `Alt+A`; trên **Windows và Linux dùng được cả `Ctrl+A`**) chọn tất cả và copy luôn (gõ chữ để thay thế, `Backspace` để cắt). Trên Windows/Linux không cần cấu hình gì thêm. Trên Mac, terminal không bao giờ gửi phím Cmd cho ứng dụng, nên `Cmd+A`, `Cmd+←` do terminal xử lý. Trên iTerm2, vào Settings → Profiles → Keys → Key Mappings, chọn "Send Hex Code" rồi gán: `Cmd+A` → `0x0c`, `Cmd+←` → `0x01`, `Cmd+→` → `0x05`, `Cmd+Backspace` → `0x15`.
 
 Mẹo bôi đen: hầu hết terminal cho phép bỏ qua chuột của app bằng cách giữ `Shift` (Windows Terminal, GNOME Terminal, Konsole) hoặc `Option ⌥` (iTerm2) khi kéo chuột; hoặc dùng `Ctrl+X`.
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ const (
 	overlayNone overlay = iota
 	overlayPicker
 	overlayProfile
+	overlayHelp
 )
 
 const (
@@ -95,9 +97,13 @@ type Model struct {
 	pickIdx     int
 	profileUser string
 
-	selectMode   bool   // mouse capture off so the terminal can select text
-	pickThread   bool   // the kaomoji picker was opened from the thread box
-	fatal        string // non-empty: connection is permanently gone (revoked / locked)
+	drag         dragSel
+	selAllBox    *textarea.Model // the textbox whose whole text is selected (select all), or nil
+	screen       []string        // plain text of the last rendered frame, for mouse selection
+	leakUntil    time.Time       // while set, stray mouse-report fragments are swallowed
+	selectMode   bool            // mouse capture off so the terminal can select text
+	pickThread   bool            // the kaomoji picker was opened from the thread box
+	fatal        string          // non-empty: connection is permanently gone (revoked / locked)
 	status       string
 	statusUntil  time.Time
 	reconnecting bool
@@ -125,6 +131,7 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	ta.CharLimit = maxInputRune
 	ta.SetHeight(3)
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
+	editKeys(&ta.KeyMap)
 	ta.Placeholder = "Message… (/i for kaomoji)"
 	ta.Focus()
 	tb := textarea.New()
@@ -133,6 +140,7 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	tb.CharLimit = maxInputRune
 	tb.SetHeight(3)
 	tb.KeyMap.InsertNewline = ta.KeyMap.InsertNewline
+	editKeys(&tb.KeyMap)
 	tb.Placeholder = "Reply in thread…"
 	tb.Blur()
 	return &Model{tinput: tb, ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
@@ -515,6 +523,9 @@ func (m *Model) copyLink(msg chat.Msg) {
 }
 
 func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.mouseLeak(k) {
+		return m, nil
+	}
 	s := k.String()
 	if s == keyQuit {
 		return m, tea.Quit
@@ -522,10 +533,11 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case overlayPicker:
 		return m.pickerKey(s)
-	case overlayProfile:
+	case overlayProfile, overlayHelp:
 		m.overlay = overlayNone
 		return m, nil
 	}
+	m.drag.shown = false
 	switch s {
 	case keySelect:
 		m.selectMode = !m.selectMode
@@ -557,6 +569,12 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	b := m.box()
 	if s == keyEnter {
 		return m, m.submit()
+	}
+	if m.selAllBox != nil && (m.selAllBox != b || b.Value() == "") {
+		m.selAllBox = nil
+	}
+	if handled, cmd := m.selectAllKey(b, k); handled {
+		return m, cmd
 	}
 	atStart := b.Value() == "" || (b.Line() == 0 && b.LineInfo().CharOffset == 0 && b.LineInfo().RowOffset == 0)
 	switch {
@@ -782,6 +800,9 @@ func (m *Model) command(text string) tea.Cmd {
 	case "/i":
 		m.box().Reset()
 		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, m.pane == paneThreadInput
+	case "/h", "/help":
+		m.box().Reset()
+		m.overlay = overlayHelp
 	case "/whois":
 		u := strings.TrimPrefix(arg, "@")
 		if _, ok := m.st.Users()[u]; !ok {
@@ -844,6 +865,9 @@ func (m *Model) pickerKey(s string) (tea.Model, tea.Cmd) {
 
 func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.selectMode {
+		return m, nil
+	}
+	if m.overlay == overlayNone && m.dragMouse(msg) {
 		return m, nil
 	}
 	if msg.Action == tea.MouseActionPress {
@@ -945,4 +969,28 @@ func clampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+var mouseLeakRe = regexp.MustCompile(`^(?:\x1b?\[?<\d+;\d+;\d+[Mm])+$`)
+
+// mouseLeak reports whether k is a fragment of an SGR mouse report (ESC [ < b ; x ; y M) that the
+// input parser failed to recognise, which happens when wheel events arrive faster than they are
+// read or are split across reads. Without this the fragment is typed into the textbox as "[<64;40;20M".
+func (m *Model) mouseLeak(k tea.KeyMsg) bool {
+	if k.Type != tea.KeyRunes || k.Paste {
+		return false
+	}
+	now := time.Now()
+	txt := string(k.Runes)
+	switch {
+	case k.Alt && txt == "[": // the ESC [ prefix arrived alone; the rest follows
+		m.leakUntil = now.Add(150 * time.Millisecond)
+		return true
+	case mouseLeakRe.MatchString(txt):
+		return true
+	case now.Before(m.leakUntil) && strings.Trim(txt, "<0123456789;Mm") == "":
+		m.leakUntil = now.Add(150 * time.Millisecond)
+		return true
+	}
+	return false
 }

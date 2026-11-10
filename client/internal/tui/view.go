@@ -238,12 +238,21 @@ type msgView struct {
 	Width    int
 	Selected bool
 	InThread bool // replies in the thread panel get no 💬 button
+	Online   bool // sender's presence, shown as the dot in the header
+}
+
+func presenceDot(online bool) string {
+	if online {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
+	}
+	return dim.Render("○")
 }
 
 // renderMessage returns the message as display lines, each at most v.Width cells wide:
 //
-//	■ Name  hh:mm
+//	● Name  hh:mm                       (others: left)
 //	  text…                 [📋][⚓][💬 N]
+//	                hh:mm  Name ●       (own messages: flush right)
 func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	prefix := " "
 	if v.Selected {
@@ -254,12 +263,20 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 			}
 		}()
 	}
-	head := zone.Mark("av:"+m.ID, avatar.Dot(m.Sender)) + " " + nameStyle(m.Sender).Render(v.Name) + "  " + dim.Render(m.CreatedAt.Local().Format("15:04"))
+	own := v.Me != "" && m.Sender == v.Me
+	dot := zone.Mark("av:"+m.ID, presenceDot(v.Online))
+	stamp := dim.Render(m.CreatedAt.Local().Format("15:04"))
+	name := nameStyle(m.Sender).Render(v.Name)
+	var head string
+	if own {
+		head = stamp + "  " + name + " " + dot
+	} else {
+		head = dot + " " + name + "  " + stamp
+	}
 	if m.ParentID != "" && !v.InThread {
 		head += "  " + dim.Render("↳ reply to "+chat.ExpiredText)
 	}
 	lines = []string{head}
-	own := v.Me != "" && m.Sender == v.Me
 	defer func() {
 		// Own messages hug the right edge (block right-aligned, text left-aligned inside).
 		pad := 0
@@ -269,6 +286,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 				mw = maxInt(mw, width(l))
 			}
 			pad = maxInt(0, v.Width-2-mw)
+			lines[0] = strings.Repeat(" ", maxInt(0, mw-width(lines[0]))) + lines[0] // header flush right
 		}
 		for i := range lines {
 			lines[i] = prefix + strings.Repeat(" ", pad) + lines[i]
@@ -337,18 +355,18 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 }
 
 // renderThread renders the thread panel body: the root (a placeholder when nil or expired) then replies.
-func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, me string, width, sel int) [][]string {
+func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, online func(string) bool, me string, width, sel int) [][]string {
 	var blocks [][]string
 	idx := 0
 	if root == nil || root.Text == chat.ExpiredText && root.Sender == "" {
 		blocks = append(blocks, []string{" " + dim.Render(chat.ExpiredText)})
 	} else {
-		blocks = append(blocks, renderMessage(*root, msgView{Name: name(root.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
+		blocks = append(blocks, renderMessage(*root, msgView{Name: name(root.Sender), Online: online(root.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
 		idx++
 	}
 	blocks = append(blocks, []string{" " + dim.Render(strings.Repeat("─", maxInt(1, width-2)))})
 	for _, r := range replies {
-		blocks = append(blocks, renderMessage(r, msgView{Name: name(r.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
+		blocks = append(blocks, renderMessage(r, msgView{Name: name(r.Sender), Online: online(r.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
 		idx++
 	}
 	return spaced(blocks)
@@ -506,6 +524,12 @@ func fit(lines []string, w, h int) string {
 
 // ---- Model rendering ----
 
+// isOnline snapshots presence once per render.
+func (m *Model) isOnline() func(string) bool {
+	us := m.st.Users()
+	return func(u string) bool { return us[u].Online }
+}
+
 func (m *Model) nameOf(u string) string { return m.st.DisplayName(u) }
 
 func (m *Model) convTitle(conv string) string {
@@ -652,8 +676,9 @@ func (m *Model) viewChat(w, h int) string {
 		bodyH = 1
 	}
 	var blocks [][]string
+	online := m.isOnline()
 	for i, msg := range m.st.Timeline(conv) {
-		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain}))
+		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain}))
 	}
 	blocks = spaced(blocks)
 	sel := -1
@@ -670,7 +695,7 @@ func (m *Model) viewChat(w, h int) string {
 	plus := zone.Mark("plus", accent.Render("[+]"))
 	foot := plus + dim.Render(" kaomoji  ") + counter
 	var boxed []string
-	for _, l := range strings.Split(m.input.View(), "\n") {
+	for _, l := range strings.Split(m.boxView(&m.input), "\n") {
 		boxed = append(boxed, " "+l)
 	}
 	// The whole box (border included) is one click zone that focuses the input.
@@ -690,7 +715,7 @@ func (m *Model) viewThread(w, h int) string {
 	if m.pane == paneThread {
 		sel = m.selThread
 	}
-	blocks := renderThread(root, replies, m.nameOf, m.st.Me(), inner, sel)
+	blocks := renderThread(root, replies, m.nameOf, m.isOnline(), m.st.Me(), inner, sel)
 	// block index for selection: blocks[0]=root, blocks[1]=separator, then replies
 	bsel := -1
 	if sel >= 0 {
@@ -708,7 +733,7 @@ func (m *Model) viewThread(w, h int) string {
 	bodyH := maxInt(1, h-2-1-boxH)
 	lines = append(lines, window(blocks, bsel, bodyH, &m.topThr, &m.pinThr)...)
 	var boxed []string
-	for _, l := range strings.Split(m.tinput.View(), "\n") {
+	for _, l := range strings.Split(m.boxView(&m.tinput), "\n") {
 		boxed = append(boxed, " "+l)
 	}
 	box := paneBox(fit(boxed, inner-2, m.tinput.Height()), inner-2, m.pane == paneThreadInput)
@@ -760,6 +785,15 @@ func (m *Model) overlayView() []string {
 				sb.WriteString(zone.Mark(fmt.Sprintf("kao:%d", i), text))
 			}
 			lines = append(lines, sb.String())
+		}
+	case overlayHelp:
+		lines = append(lines, nameSt.Render("Shortcuts")+dim.Render("  press any key to close"), "")
+		for _, e := range helpEntries {
+			if e[0] == "" {
+				lines = append(lines, "")
+				continue
+			}
+			lines = append(lines, accent.Render(padTo(e[0], 18))+e[1])
 		}
 	case overlayProfile:
 		u, ok := m.st.Users()[m.profileUser]
@@ -840,8 +874,11 @@ func (m *Model) View() string {
 		lines = append(lines, "")
 	}
 	lines = lines[:m.h]
+	m.screen = m.screen[:0]
 	for i, l := range lines {
 		lines[i] = padTo(l, m.w)
+		m.screen = append(m.screen, ansi.Strip(lines[i]))
 	}
+	m.highlight(lines)
 	return strings.Join(lines, "\n")
 }

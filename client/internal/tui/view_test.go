@@ -106,7 +106,7 @@ func TestThreadNilRootShowsExpired(t *testing.T) {
 	name := func(s string) string { return s }
 	reply := chat.Msg{ID: "r1", Conv: "hell", Sender: "bob", ParentID: "gone", Text: "kept reply", Kept: true, CreatedAt: time.Now()}
 	for _, root := range []*chat.Msg{nil, {ID: "gone", Text: chat.ExpiredText}} {
-		blocks := renderThread(root, []chat.Msg{reply}, name, "me", 40, -1)
+		blocks := renderThread(root, []chat.Msg{reply}, name, func(string) bool { return true }, "me", 40, -1)
 		var all []string
 		for _, b := range blocks {
 			all = append(all, b...)
@@ -723,7 +723,7 @@ func TestMessageStylingItalicBodyColouredName(t *testing.T) {
 	}
 	// system lines stay dim and upright
 	for _, root := range []*chat.Msg{nil} {
-		for _, b := range renderThread(root, nil, func(s string) string { return s }, "me", 40, -1)[:1] {
+		for _, b := range renderThread(root, nil, func(s string) string { return s }, func(string) bool { return false }, "me", 40, -1)[:1] {
 			if strings.Contains(strings.Join(b, ""), "\x1b[3m") || !strings.Contains(strings.Join(b, ""), "[message expired]") {
 				t.Fatalf("expired placeholder: %q", b)
 			}
@@ -1360,5 +1360,191 @@ func TestSelectModeTogglesMouseCapture(t *testing.T) {
 	m.Update(click(z.StartX+1, z.StartY))
 	if m.overlay != overlayPicker {
 		t.Fatal("clicks should work again")
+	}
+}
+
+func TestLeakedMouseReportIsNotTyped(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	m.conn = &fakeLink{}
+	m.focusInput()
+	send := func(k tea.KeyMsg) { m.Update(k) }
+	// whole sequence arriving as text
+	send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<64;40;20M[<65;40;20M")})
+	// split: ESC [ alone, then the tail in pieces
+	send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("["), Alt: true})
+	send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("<64;40")})
+	send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(";20M")})
+	if v := m.input.Value(); v != "" {
+		t.Fatalf("mouse fragments leaked into input: %q", v)
+	}
+	send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	if v := m.input.Value(); v != "hi" {
+		t.Fatalf("normal typing broken: %q", v)
+	}
+}
+
+func TestHelpCommandShowsShortcuts(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	m.conn = &fakeLink{}
+	m.focusInput()
+	m.input.SetValue("/h")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.overlay != overlayHelp {
+		t.Fatalf("overlay = %v", m.overlay)
+	}
+	v := ansi.Strip(m.View())
+	if !strings.Contains(v, "Shortcuts") || !strings.Contains(v, "Ctrl+N / Ctrl+P") {
+		t.Fatalf("help not rendered:\n%s", v)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.overlay != overlayNone || m.input.Value() != "" {
+		t.Fatalf("any key should close help without typing: overlay=%v input=%q", m.overlay, m.input.Value())
+	}
+}
+
+func TestDragSelectCopiesText(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	m.conn = &fakeLink{}
+	var copied []string
+	old := copyText
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	t.Cleanup(func() { copyText = old })
+	pm := sealedMsg(t, bob, me, "bob", "r1", "hell", "", "hello world selectable")
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	m.View()
+	// find the row/column of the message text in the chat pane
+	row, col := -1, -1
+	for y, l := range m.screen {
+		if i := strings.Index(l, "hello world"); i >= 0 {
+			row, col = y, runewidthIndex(l, i)
+			break
+		}
+	}
+	if row < 0 {
+		t.Fatalf("message not on screen:\n%s", strings.Join(m.screen, "\n"))
+	}
+	m.Update(tea.MouseMsg{X: col, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m.Update(tea.MouseMsg{X: col + 4, Y: row, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
+	m.View()
+	m.Update(tea.MouseMsg{X: col + 4, Y: row, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	if len(copied) != 1 || copied[0] != "hello" {
+		t.Fatalf("copied %q", copied)
+	}
+	// a plain click (no drag) copies nothing
+	m.Update(tea.MouseMsg{X: col, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	m.Update(tea.MouseMsg{X: col, Y: row, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	if len(copied) != 1 {
+		t.Fatalf("click copied: %q", copied)
+	}
+}
+
+func runewidthIndex(s string, byteIdx int) int { return width(s[:byteIdx]) }
+
+func TestHeaderShowsPresenceDotAndOwnNameFlushRight(t *testing.T) {
+	m := chat.Msg{ID: "1", Sender: "me", Text: "hi", CreatedAt: time.Now()}
+	own := ansi.Strip(renderMessage(m, msgView{Name: "Me", Me: "me", Width: 40, Online: true})[0])
+	if !strings.HasSuffix(strings.TrimRight(own, " "), "Me ●") || width(own) != 39 {
+		t.Fatalf("own header %q (w=%d)", own, width(own))
+	}
+	m.Sender = "bob"
+	other := ansi.Strip(renderMessage(m, msgView{Name: "Bob", Me: "me", Width: 40, Online: false})[0])
+	if !strings.HasPrefix(strings.TrimSpace(other), "○ Bob") {
+		t.Fatalf("other header %q", other)
+	}
+}
+
+func keyOf(s string) tea.KeyMsg {
+	switch s {
+	case "ctrl+left":
+		return tea.KeyMsg{Type: tea.KeyCtrlLeft}
+	case "ctrl+right":
+		return tea.KeyMsg{Type: tea.KeyCtrlRight}
+	case "alt+left":
+		return tea.KeyMsg{Type: tea.KeyLeft, Alt: true}
+	case "home":
+		return tea.KeyMsg{Type: tea.KeyHome}
+	case "end":
+		return tea.KeyMsg{Type: tea.KeyEnd}
+	case "ctrl+l":
+		return tea.KeyMsg{Type: tea.KeyCtrlL}
+	case "backspace":
+		return tea.KeyMsg{Type: tea.KeyBackspace}
+	}
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+}
+
+func TestTextboxWordJumpHomeEndAndSelectAll(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	m.conn = &fakeLink{}
+	var copied []string
+	old := copyText
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	t.Cleanup(func() { copyText = old })
+	m.focusInput()
+	m.input.SetValue("hello big world")
+	typ := func(s string) { m.Update(keyOf(s)) }
+
+	typ("ctrl+left") // start of "world"
+	typ("1")
+	typ("alt+left") // start of "1world"
+	typ("alt+left") // start of "big"
+	typ("2")
+	typ("ctrl+right") // end of "2big"
+	typ("3")
+	if v := m.input.Value(); v != "hello 2big3 1world" {
+		t.Fatalf("word jumps: %q", v)
+	}
+	typ("home")
+	typ("<")
+	typ("end")
+	typ(">")
+	if v := m.input.Value(); v != "<hello 2big3 1world>" {
+		t.Fatalf("home/end: %q", v)
+	}
+
+	typ("ctrl+l") // select all: copies, highlights
+	if len(copied) != 1 || copied[0] != "<hello 2big3 1world>" || m.selAllBox != &m.input {
+		t.Fatalf("select all: copied=%q sel=%v", copied, m.selAllBox != nil)
+	}
+	m.View() // renders the highlighted box without panicking
+	typ("n") // typing replaces
+	if v := m.input.Value(); v != "n" || m.selAllBox != nil {
+		t.Fatalf("replace: %q", v)
+	}
+	typ("ctrl+l")
+	typ("backspace") // cut
+	if m.input.Value() != "" {
+		t.Fatalf("backspace should clear: %q", m.input.Value())
+	}
+	m.input.SetValue("keep me")
+	typ("ctrl+l")
+	typ("home") // deselects, keeps text, cursor at start
+	typ("!")
+	if v := m.input.Value(); v != "!keep me" {
+		t.Fatalf("home after select all: %q", v)
+	}
+}
+
+func TestCtrlASelectAllOnWindowsLinuxOnly(t *testing.T) {
+	old := ctrlASelectsAll
+	t.Cleanup(func() { ctrlASelectsAll = old })
+	for _, on := range []bool{true, false} {
+		ctrlASelectsAll = on
+		m, _, _ := newTestModel(t)
+		m.conn = &fakeLink{}
+		m.focusInput()
+		m.input.SetValue("abc def")
+		m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+		if got := m.selAllBox != nil; got != on {
+			t.Fatalf("ctrl+a select-all=%v want %v", got, on)
+		}
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+		want := "X" // replaced the selection
+		if !on {
+			want = "Xabc def" // line start, then insert
+		}
+		if v := m.input.Value(); v != want {
+			t.Fatalf("on=%v value %q want %q", on, v, want)
+		}
 	}
 }

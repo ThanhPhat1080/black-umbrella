@@ -28,6 +28,35 @@ npx wrangler deploy
 Local development: `cp .dev.vars.example .dev.vars && npx wrangler dev --port 8787`
 (the default admin token in `.dev.vars.example` is `dev`).
 
+## Install and update
+
+Download the binary for your machine from the [latest release](https://github.com/ThanhPhat1080/black-umbrella/releases/latest)
+(`umbrella-darwin-{arm64,amd64}`, `umbrella-linux-{amd64,arm64}`, `umbrella-windows-amd64.exe`).
+Your key lives in `~/.umbrella/` (`%APPDATA%\umbrella\` on Windows), so updating only replaces the
+program and never requires registering again. Quit Umbrella before updating.
+
+macOS (use `amd64` on Intel Macs; the same commands install it the first time):
+
+```sh
+sudo mkdir -p /usr/local/bin
+sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella
+sudo chmod +x /usr/local/bin/umbrella
+sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella   # binary is not notarised; ignore "No such xattr"
+```
+
+Windows (PowerShell):
+
+```powershell
+# first install only
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\umbrella" | Out-Null
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:LOCALAPPDATA\umbrella", "User")
+# install or update
+Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"
+```
+
+On first install reopen PowerShell. If SmartScreen warns, choose **More info → Run anyway**. If Windows says
+the file is in use, close every running `umbrella` window and retry. Windows Terminal is recommended.
+
 ## Build the client
 
 Needs Go 1.24+.
@@ -68,12 +97,20 @@ on any proxy you put in front of the Worker.
 | o | open the selected message's first link in the browser (clicking any link also opens it) |
 | y | copy the selected message's first link |
 | c | copy the selected message's full text |
+| Mouse drag | select text inside a pane; it is copied to the clipboard on release |
+| /h | show all shortcuts |
 | Ctrl+X | toggle select mode: mouse capture off so you can drag-select text and copy it with your terminal |
 | a | toggle keep (anchor) on your own message |
 | r or Right | open the selected message's thread (Right also focuses the thread reply textbox) |
 | Left or Esc | with a thread open: close it and return to the message list with the same message selected |
 | Esc | message list without a thread / picker: return to the input |
 | Ctrl+C or /quit | quit |
+
+Textbox editing: Ctrl+←/→ or Option+←/→ jump a word, Home/End (or Ctrl+E for the end; Ctrl+A for the start on macOS) go to the line start/end,
+Ctrl+W deletes a word, Ctrl+U deletes to the line start, **Ctrl+L** (or Alt+A; also **Ctrl+A on Windows and Linux**) selects all text and copies it
+(type to replace, Backspace to cut). Terminals never deliver the Cmd key, so on a Mac Cmd+A/Cmd+← are handled by the
+terminal itself: in iTerm2 map them under Settings → Profiles → Keys → Key Mappings with the action
+"Send Hex Code": Cmd+A → `0x0c`, Cmd+← → `0x01`, Cmd+→ → `0x05`, Cmd+Backspace → `0x15`.
 
 Text selection: while the app has the mouse, most terminals still let you bypass it by holding Shift (Windows Terminal, GNOME Terminal, Konsole) or Option ⌥ (iTerm2) while dragging; or use Ctrl+X select mode above.
 

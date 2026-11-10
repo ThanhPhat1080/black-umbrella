@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.8 — 2026-11-10
+- Client: mouse-drag text selection and copy (stays within one pane); message editing.
+- Docs: install and update instructions for macOS and Windows.
+
 ## v0.1.6 — 2026-11-10
 - Client: blank line between messages (chat and thread panels).
 - Client: your own messages are right-aligned (and wrap narrower); other users' stay on the left.
