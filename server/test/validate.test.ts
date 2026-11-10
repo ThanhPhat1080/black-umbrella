@@ -47,3 +47,12 @@ describe("schema", () => {
     expect(s.exec("SELECT code FROM invites")).toEqual([{ code: "c" }]);
   });
 });
+
+import { sha256Hex } from "../src/sha256";
+import { createHash } from "node:crypto";
+describe("sha256", () => {
+  it("matches node", () => {
+    for (const s of ["", "abc", "Tiếng Việt 🌂", "x".repeat(55), "x".repeat(56), "x".repeat(64), "x".repeat(1000)])
+      expect(sha256Hex(s)).toBe(createHash("sha256").update(s).digest("hex"));
+  });
+});

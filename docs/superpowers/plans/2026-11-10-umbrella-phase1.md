@@ -67,11 +67,11 @@ Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's r
 
 Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined_at, last_seen, fails, locks, locked_until)`, `invites(code PK, username NULL, created_at)`, `sessions(token_hash PK, username, expires_at)`, `messages(id PK, conv, sender, parent_id, created_at, kept, nonce, ct)`, `message_keys(message_id, username, wrapped, PK(message_id, username))`, indexes on `messages(conv)`, `messages(kept, created_at)`.
 
-- [ ] **Step 1:** Write `validate.test.ts`: `validUsername("ab")===false`, `("abc")`, `("a_1")` true, `("Abc")` false, 21 chars false; `validPin("123456")` true, `"12345"`, `"12345a"` false; `normalizeDisplayName("  Phát 🌂 ")==="Phát 🌂"`, 33 runes → null, `"   "` → null; `dmConv("b","a")==="dm:a|b"`; `parseConv("dm:a|a")===null`, `parseConv("hell")` → hell.
-- [ ] **Step 2:** `cd server && npx vitest run` → FAIL (module missing).
-- [ ] **Step 3:** Implement the above; `memorySql` wraps `node:sqlite` `DatabaseSync` (`prepare(q).all(...p)` for statements returning rows, `run` otherwise — detect by `stmt.columns().length`). `migrate` is idempotent (`CREATE … IF NOT EXISTS`). `wrangler.toml`: `main="src/index.ts"`, DO binding `HUB` class `HubDO`, migration `new_sqlite_classes=["HubDO"]`, `compatibility_date="2026-10-01"`.
-- [ ] **Step 4:** `npx vitest run` → PASS; `npx tsc --noEmit` → no errors.
-- [ ] **Step 5:** Commit `feat(server): scaffold, schema and validation`.
+- [x] **Step 1:** Write `validate.test.ts`: `validUsername("ab")===false`, `("abc")`, `("a_1")` true, `("Abc")` false, 21 chars false; `validPin("123456")` true, `"12345"`, `"12345a"` false; `normalizeDisplayName("  Phát 🌂 ")==="Phát 🌂"`, 33 runes → null, `"   "` → null; `dmConv("b","a")==="dm:a|b"`; `parseConv("dm:a|a")===null`, `parseConv("hell")` → hell.
+- [x] **Step 2:** `cd server && npx vitest run` → FAIL (module missing).
+- [x] **Step 3:** Implement the above; `memorySql` wraps `node:sqlite` `DatabaseSync` (`prepare(q).all(...p)` for statements returning rows, `run` otherwise — detect by `stmt.columns().length`). `migrate` is idempotent (`CREATE … IF NOT EXISTS`). `wrangler.toml`: `main="src/index.ts"`, DO binding `HUB` class `HubDO`, migration `new_sqlite_classes=["HubDO"]`, `compatibility_date="2026-10-01"`.
+- [x] **Step 4:** `npx vitest run` → PASS; `npx tsc --noEmit` → no errors.
+- [x] **Step 5:** Commit `feat(server): scaffold, schema and validation`.
 
 ### Task 2: Auth core — invites, register, login, lockout, sessions, admin
 
@@ -83,11 +83,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Task 1.
 - Produces: `class Auth { constructor(sql: Sql, now: () => number); createInvite(username?: string): string; register(b): Promise<{token, user}>; login(username, pin): Promise<string>; userForToken(token): string | null; reset(username): string; unlock(username): void }` throwing `ApiError(status, code, extra?)`; `handleHttp(req: Request, auth: Auth, adminToken: string): Promise<Response | null>` (null = not an auth route); `userView(row, online): User`.
 
-- [ ] **Step 1:** Tests (fake clock): register with valid invite → token; invite reused → 403 `invalid_invite`; duplicate username → 409; reset-bound invite only valid for its username and re-registration replaces key while keeping `joined_at`; login good PIN → token whose `userForToken` returns username; 5 bad PINs → 6th call 423 with `until = now+15min`, even with right PIN; after `until` passes, 5 more bad → `until = now+30min`; success resets `fails` and `locks`; `unlock` clears; expired session (now+7d+1) → null; `handleHttp` admin without bearer → 401, `/api/admin/invite` with bearer → `{code}`.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement. PBKDF2 via `crypto.subtle.deriveBits` (100 000, SHA-256, 256 bits); compare in constant time. Invite/token: 16 / 32 random bytes base64url. Store `sha256(token)` hex. Invite codes are consumed in the same call that creates the user.
-- [ ] **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit `feat(server): auth, lockout and admin endpoints`.
+- [x] **Step 1:** Tests (fake clock): register with valid invite → token; invite reused → 403 `invalid_invite`; duplicate username → 409; reset-bound invite only valid for its username and re-registration replaces key while keeping `joined_at`; login good PIN → token whose `userForToken` returns username; 5 bad PINs → 6th call 423 with `until = now+15min`, even with right PIN; after `until` passes, 5 more bad → `until = now+30min`; success resets `fails` and `locks`; `unlock` clears; expired session (now+7d+1) → null; `handleHttp` admin without bearer → 401, `/api/admin/invite` with bearer → `{code}`.
+- [x] **Step 2:** Run → FAIL.
+- [x] **Step 3:** Implement. PBKDF2 via `crypto.subtle.deriveBits` (100 000, SHA-256, 256 bits); compare in constant time. Invite/token: 16 / 32 random bytes base64url. Store `sha256(token)` hex. Invite codes are consumed in the same call that creates the user.
+- [x] **Step 4:** Run → PASS.
+- [x] **Step 5:** Commit `feat(server): auth, lockout and admin endpoints`.
+
+> **Deviation:** Added `server/src/sha256.ts` (sync SHA-256) because `Auth.userForToken` is specified sync but WebCrypto digest is async. 5th bad PIN returns 401; the lock is reported (423) from the 6th call on.
 
 ### Task 3: Realtime core — hello, send, keep, typing, name, presence, expiry
 
