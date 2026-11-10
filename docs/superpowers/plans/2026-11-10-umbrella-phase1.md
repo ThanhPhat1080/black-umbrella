@@ -101,11 +101,13 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Tasks 1–2.
 - Produces: `interface Outbox { send(username: string, msg: object): void; online(): string[] }`; `class Core { constructor(sql, auth, out: Outbox, now); hello(username): object; onConnect(username, firstSocket: boolean): void; onDisconnect(username, lastSocket: boolean): void; onMessage(username, raw: string): void; sweep(): string[] }`; `const EXPIRY_MS = 86_400_000`.
 
-- [ ] **Step 1:** Tests with a recording `Outbox`: `hello` returns `me`, all users (online flags from `out.online()`), only messages where `message_keys` has a row for that user, each with its own `key`; `send` to hell with keys for all users → every user gets `{t:"msg"}` with their key and the sender's frame includes `ref`; keys missing a user → `error recipients_mismatch` to sender only; DM delivered only to the two participants; `parentId` of a reply or other conv → `bad_parent`; `keep` by non-sender → `not_owner`; keep → broadcast `kept` to recipients; `sweep` at createdAt+24h+1 deletes non-kept, keeps kept, returns ids and sends `expired`; unkeep of a 25 h old message deletes it immediately and sends `expired`; `typing` reaches conv participants except sender; `name` updates and broadcasts `user`; first connect / last disconnect broadcast `user` with online/lastSeen; registration broadcast (`Core.userJoined(username)`) sends `user` to all online.
-- [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3:** Implement. Message id = `createdAt` base36 padded to 9 + 8 random hex chars (sortable). Delete `message_keys` with their message. Malformed JSON / unknown `t` → ignored.
-- [ ] **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit `feat(server): realtime core with expiry and keep`.
+- [x] **Step 1:** Tests with a recording `Outbox`: `hello` returns `me`, all users (online flags from `out.online()`), only messages where `message_keys` has a row for that user, each with its own `key`; `send` to hell with keys for all users → every user gets `{t:"msg"}` with their key and the sender's frame includes `ref`; keys missing a user → `error recipients_mismatch` to sender only; DM delivered only to the two participants; `parentId` of a reply or other conv → `bad_parent`; `keep` by non-sender → `not_owner`; keep → broadcast `kept` to recipients; `sweep` at createdAt+24h+1 deletes non-kept, keeps kept, returns ids and sends `expired`; unkeep of a 25 h old message deletes it immediately and sends `expired`; `typing` reaches conv participants except sender; `name` updates and broadcasts `user`; first connect / last disconnect broadcast `user` with online/lastSeen; registration broadcast (`Core.userJoined(username)`) sends `user` to all online.
+- [x] **Step 2:** Run → FAIL.
+- [x] **Step 3:** Implement. Message id = `createdAt` base36 padded to 9 + 8 random hex chars (sortable). Delete `message_keys` with their message. Malformed JSON / unknown `t` → ignored.
+- [x] **Step 4:** Run → PASS.
+- [x] **Step 5:** Commit `feat(server): realtime core with expiry and keep`.
+
+> **Deviation:** Tests and implementation were written together (no separate RED run for this task). `hello.me` is the username string. Expiry is inclusive (`created_at + 24h <= now`).
 
 ### Task 4: Durable Object + Worker wiring, local smoke
 
