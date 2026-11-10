@@ -37,11 +37,11 @@ HTTP JSON, errors are `{"error": "<code>"}`:
 Admin routes use `Authorization: Bearer <ADMIN_TOKEN>`. Reset invites are bound to the username (`invites.username`), plain invites have `username = NULL`.
 
 `User = {username, displayName, publicKey, joinedAt, online, lastSeen}` (times in ms, `lastSeen` null if never).
-`Message = {id, conv, sender, parentId, createdAt, kept, nonce, ct, key}` — `key` is the wrapped key for the receiving user only; `parentId` null for roots.
+`Message = {id, conv, sender, parentId, createdAt, kept, nonce, ct, senderKey, key}` — `key` is the wrapped key for the receiving user only; `senderKey` is the sender's public key (base64) at send time, stored server-side so messages stay readable after the sender re-registers (client falls back to the sender's current key when empty); `parentId` null for roots.
 
 WS client → server: `{t:"send", ref, conv, parentId?, nonce, ct, keys:{username: wrapped}}`, `{t:"keep", id, kept}`, `{t:"typing", conv}`, `{t:"name", displayName}`.
 WS server → client: `{t:"hello", me, users, messages}`, `{t:"msg", ref?, message}`, `{t:"kept", id, kept}`, `{t:"expired", ids}`, `{t:"typing", conv, username}`, `{t:"user", user}`, `{t:"error", ref?, error}`.
-Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's recipient set exactly (hell = all users having a public key; dm = both) else `error: recipients_mismatch`. Error codes for WS: `bad_conv`, `bad_parent`, `too_large` (`ct` > 24 000 chars), `not_owner`, `not_found`, `invalid_display_name`.
+Conv ids: `hell`, `dm:<a>|<b>` with `a < b`. `send` keys must equal the conv's recipient set exactly (hell = all users having a public key; dm = both) else `error: recipients_mismatch`. Error codes for WS: `bad_conv`, `bad_parent`, `bad_request` (nonce must be exactly 32 base64 chars, each wrapped key exactly 96), `too_large` (`ct` > 32 768 chars), `not_owner`, `not_found`, `keep_limit` (max 200 kept messages per user), `invalid_display_name`. `admin reset` closes the user's sockets with close code 4001 and broadcasts a `user` update with an empty `publicKey`; DM recipients require a public key. Display names containing control characters are rejected (`invalid_display_name`).
 
 ## Review Focus
 

@@ -251,4 +251,44 @@ func TestFlow(t *testing.T) {
 	if _, err := e.c.Login(e.ctx, bob.name, "123456"); err != nil {
 		t.Fatal("login after unlock:", err)
 	}
+
+	// admin reset: bob's live socket is closed with 4001, others drop his key, and after he
+	// re-registers with a new key his old messages still decrypt (the message carries senderKey).
+	rc, err := e.c.AdminReset(e.ctx, e.admin, bob.name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range bob.conn.Events() {
+	}
+	if bob.conn.CloseCode() != 4001 {
+		t.Fatalf("bob close code %d", bob.conn.CloseCode())
+	}
+	ev := e.expect(alice, func(ev proto.Event) bool {
+		return ev.T == "user" && ev.User.Username == bob.name && ev.User.PublicKey == ""
+	})
+	if ev.User.Online {
+		t.Fatal("reset user should be offline")
+	}
+	if got := alice.st.Recipients(dm); len(got) != 1 {
+		t.Fatalf("alice can still address bob: %d recipients", len(got))
+	}
+	newKP, _ := e2e.GenerateKeyPair()
+	if _, err := e.c.Register(e.ctx, api.RegisterReq{Invite: rc, Username: bob.name, DisplayName: "Bob again", Pin: "654321",
+		PublicKey: base64.StdEncoding.EncodeToString(newKP.Public[:])}); err != nil {
+		t.Fatal(err)
+	}
+	e.expect(alice, func(ev proto.Event) bool {
+		return ev.T == "user" && ev.User.Username == bob.name && ev.User.PublicKey != ""
+	})
+	conn3, err := api.Dial(e.ctx, e.c.BaseURL, atok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn3.Close()
+	hello3 := <-conn3.Events()
+	alice.st.Apply(hello3)
+	_, replies := alice.st.Thread(root.ID)
+	if len(replies) != 1 || replies[0].Undecryptable || replies[0].Text != "reply from bob" {
+		t.Fatalf("old reply after bob re-keyed: %+v", replies)
+	}
 }

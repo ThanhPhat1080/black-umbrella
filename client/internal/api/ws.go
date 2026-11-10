@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coder/websocket"
 
@@ -35,6 +37,7 @@ type Conn struct {
 	cancel context.CancelFunc
 	ctx    context.Context
 	once   sync.Once
+	code   atomic.Int32
 }
 
 // Dial opens the WebSocket. The Events channel is closed when the connection ends.
@@ -59,6 +62,7 @@ func (c *Conn) readLoop() {
 	for {
 		_, data, err := c.ws.Read(c.ctx)
 		if err != nil {
+			c.code.Store(int32(websocket.CloseStatus(err)))
 			return
 		}
 		var ev proto.Event
@@ -73,14 +77,20 @@ func (c *Conn) readLoop() {
 	}
 }
 
+// CloseCode is the WebSocket close status the server ended the connection with (-1 if none);
+// it is valid once Events() has been closed. 4001 means the session was revoked by an admin reset.
+func (c *Conn) CloseCode() int { return int(c.code.Load()) }
+
 func (c *Conn) Events() <-chan proto.Event { return c.events }
 
 func (c *Conn) Send(v any) error {
-	data, err := json.Marshal(v)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		return err
 	}
-	return c.ws.Write(c.ctx, websocket.MessageText, data)
+	return c.ws.Write(c.ctx, websocket.MessageText, bytes.TrimRight(buf.Bytes(), "\n"))
 }
 
 func (c *Conn) Close() {

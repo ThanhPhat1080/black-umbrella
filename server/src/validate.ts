@@ -8,6 +8,7 @@ export function validPin(s: unknown): s is string {
 
 export function normalizeDisplayName(s: unknown): string | null {
   if (typeof s !== "string") return null;
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(s.trim())) return null;
   const t = s.trim();
   const n = [...t].length;
   return n >= 1 && n <= 32 ? t : null;

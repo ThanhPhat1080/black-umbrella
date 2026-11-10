@@ -19,6 +19,7 @@ type Message struct {
 	Kept      bool   `json:"kept"`
 	Nonce     string `json:"nonce"`
 	CT        string `json:"ct"`
+	SenderKey string `json:"senderKey"` // sender's public key at send time ("" for old messages)
 	Key       string `json:"key"`
 }
 

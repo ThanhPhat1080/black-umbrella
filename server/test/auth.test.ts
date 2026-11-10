@@ -160,3 +160,23 @@ describe("http", () => {
     expect((await call("/api/admin/reset", { username: "nobody" }, "secret"))!.status).toBe(404);
   });
 });
+
+describe("races", () => {
+  it("concurrent bad logins still count every failure and lock", async () => {
+    await reg(auth.createInvite());
+    await Promise.all([1, 2, 3, 4, 5].map(() => code(() => auth.login("alice", "000000"))));
+    const e = await code(() => auth.login("alice", "123456"));
+    expect([e.status, e.code]).toEqual([423, "locked"]);
+  });
+  it("concurrent registrations of one username: one wins, the loser gets 409 and keeps its invite", async () => {
+    const i1 = auth.createInvite();
+    const i2 = auth.createInvite();
+    const res = await Promise.allSettled([reg(i1), reg(i2)]);
+    const bad = res.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+    expect(res.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(bad).toHaveLength(1);
+    expect(bad[0].reason).toBeInstanceOf(ApiError);
+    expect([bad[0].reason.status, bad[0].reason.code]).toEqual([409, "username_taken"]);
+    expect(sql.exec("SELECT code FROM invites")).toHaveLength(1);
+  });
+});

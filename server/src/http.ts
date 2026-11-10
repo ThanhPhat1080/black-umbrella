@@ -38,6 +38,7 @@ export async function handleHttp(
   auth: Auth,
   adminToken: string,
   onRegistered?: (user: User) => void,
+  onReset?: (username: string) => void,
 ): Promise<Response | null> {
   const path = new URL(req.url).pathname;
   if (!ROUTES.has(path)) return null;
@@ -50,7 +51,11 @@ export async function handleHttp(
       if (path === "/api/admin/invite") return json(200, { code: auth.createInvite() });
       const b = await readBody(req);
       const username = typeof b.username === "string" ? b.username : "";
-      if (path === "/api/admin/reset") return json(200, { code: auth.reset(username) });
+      if (path === "/api/admin/reset") {
+        const code = auth.reset(username);
+        onReset?.(username);
+        return json(200, { code });
+      }
       auth.unlock(username);
       return json(200, { ok: true });
     }

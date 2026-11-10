@@ -19,6 +19,7 @@ export class HubDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const sql: Sql = {
+      tx: <T>(fn: () => T): T => ctx.storage.transactionSync(fn),
       exec: <T>(q: string, ...p: unknown[]) => ctx.storage.sql.exec(q, ...(p as never[])).toArray() as T[],
     };
     ctx.blockConcurrencyWhile(async () => migrate(sql));
@@ -55,7 +56,7 @@ export class HubDO extends DurableObject<Env> {
     await this.ensureAlarm();
     const url = new URL(req.url);
     if (url.pathname === "/api/ws") return this.upgrade(req, url);
-    const res = await handleHttp(req, this.auth, this.env.ADMIN_TOKEN ?? "", (u) => this.core.userJoined(u.username));
+    const res = await handleHttp(req, this.auth, this.env.ADMIN_TOKEN ?? "", (u) => this.core.userJoined(u.username), (u) => this.revoke(u));
     return res ?? json(404, { error: "not_found" });
   }
 
@@ -77,7 +78,24 @@ export class HubDO extends DurableObject<Env> {
     if (username && typeof message === "string") this.core.onMessage(username, message);
   }
 
+  /** Admin reset: drop every live socket of the user and tell the others their key is gone. */
+  private revoke(username: string): void {
+    for (const ws of this.ctx.getWebSockets(username)) {
+      this.goneSockets.add(ws);
+      try {
+        ws.close(4001, "session revoked");
+      } catch {
+        /* already closed */
+      }
+    }
+    this.core.onDisconnect(username, true);
+  }
+
+  private goneSockets = new WeakSet<WebSocket>();
+
   private gone(ws: WebSocket): void {
+    if (this.goneSockets.has(ws)) return; // webSocketError and webSocketClose can both fire for one socket
+    this.goneSockets.add(ws);
     const username = this.ctx.getTags(ws)[0];
     if (!username) return;
     const others = this.ctx.getWebSockets(username).filter((s) => s !== ws && s.readyState === WebSocket.OPEN);

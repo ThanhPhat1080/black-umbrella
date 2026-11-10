@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,25 @@ func TestUnicodeByteExact(t *testing.T) {
 	got, err := Open(s.Nonce, s.CT, s.Keys["a"], a, a.Public)
 	if err != nil || got != text {
 		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func TestSealDoesNotHTMLEscapeAndFitsLimit(t *testing.T) {
+	a := mustKP(t)
+	text := strings.Repeat("<", 4000)
+	s, err := Seal(text, a, map[string][32]byte{"a": a.Public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.CT) > 7000 { // 4000 raw bytes + JSON + tag, base64; HTML escaping would give ~32000
+		t.Fatalf("ct %d chars", len(s.CT))
+	}
+	if got, err := Open(s.Nonce, s.CT, s.Keys["a"], a, a.Public); err != nil || got != text {
+		t.Fatal(err)
+	}
+	emoji := strings.Repeat("🌂", 4000)
+	s, _ = Seal(emoji, a, map[string][32]byte{"a": a.Public})
+	if len(s.CT) > 32768 {
+		t.Fatalf("emoji ct %d chars exceeds server limit", len(s.CT))
 	}
 }

@@ -50,6 +50,8 @@ Admin is a CLI (`umbrella admin …`) authenticating with `ADMIN_TOKEN` (Worker 
   recipientPub, senderPriv)` — authenticated to the sender's public key.
 - Recipients: Hell room = every registered user at send time; DM = the two participants.
 - The server is trusted to distribute public keys (no fingerprint verification, by decision).
+- The server stores the sender's public key with each message (`senderKey`) so history stays readable after a sender is reset and re-registers.
+- Untrusted text (message bodies, display names) is stripped of ANSI/control characters before display.
 - No forward secrecy. New members cannot read earlier messages. No plaintext on disk.
 - `umbrella export-key <file>` copies the encrypted key file for backup.
 

@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -54,6 +55,7 @@ type (
 	connClosedMsg  struct{ conn link }
 	reconnectedMsg struct{ conn link }
 	tickMsg        time.Time
+	fatalMsg       struct{ text string } // reconnecting can never succeed: show why and stop
 )
 
 // link is the connection surface the UI needs (satisfied by *api.Conn; fakeable in tests).
@@ -61,6 +63,7 @@ type link interface {
 	Send(v any) error
 	Close()
 	Events() <-chan proto.Event
+	CloseCode() int
 }
 
 type pendingSend struct {
@@ -87,6 +90,8 @@ type Model struct {
 	pickIdx     int
 	profileUser string
 
+	toMain       bool   // thread panel open, but the input posts to the main conversation
+	fatal        string // non-empty: connection is permanently gone (revoked / locked)
 	status       string
 	statusUntil  time.Time
 	reconnecting bool
@@ -156,6 +161,15 @@ func (m *Model) doReconnect() tea.Cmd {
 			if err == nil {
 				return reconnectedMsg{c}
 			}
+			var ae *api.APIError
+			if errors.As(err, &ae) {
+				switch ae.Code {
+				case "locked":
+					return fatalMsg{"Account locked until " + time.UnixMilli(ae.Until).Local().Format("15:04") + ". Press Ctrl+C to quit."}
+				case "bad_credentials":
+					return fatalMsg{"Login rejected: your account was reset or the PIN changed. Run `umbrella register --force`, then restart."}
+				}
+			}
 			select {
 			case <-ctx.Done():
 				return tea.Quit()
@@ -166,7 +180,7 @@ func (m *Model) doReconnect() tea.Cmd {
 }
 
 func (m *Model) setStatus(s string) {
-	m.status = s
+	m.status = chat.SanitizeLine(s)
 	m.statusUntil = time.Now().Add(6 * time.Second)
 }
 
@@ -215,8 +229,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.conn != m.conn {
 			return m, nil
 		}
+		if msg.conn.CloseCode() == 4001 {
+			m.fatal = "Session revoked by an admin. Run `umbrella register --force` with a new invite code, then restart."
+			return m, nil
+		}
 		m.reconnecting = true
 		return m, m.doReconnect()
+	case fatalMsg:
+		m.fatal, m.reconnecting = msg.text, false
+		return m, nil
 	case reconnectedMsg:
 		m.conn = msg.conn
 		m.reconnecting = false
@@ -247,10 +268,14 @@ func errorText(code string) string {
 		return "That message no longer exists."
 	case "invalid_display_name":
 		return "Display name must be 1-32 characters."
+	case "keep_limit":
+		return "You can keep at most 200 messages. Unkeep one first."
+	case "bad_request":
+		return "The server rejected that message as malformed."
 	case "recipients_mismatch":
 		return "Someone joined while you were sending. Please send again."
 	default:
-		return "Server error: " + code
+		return "Server error: " + chat.SanitizeLine(code)
 	}
 }
 
@@ -258,6 +283,7 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	var cmds []tea.Cmd
 	fx := m.st.Apply(ev)
 	if fx.Bell {
+		// BEL is zero-width and written in one write(2), so it cannot corrupt a frame.
 		cmds = append(cmds, func() tea.Msg { _, _ = os.Stdout.WriteString("\a"); return nil })
 	}
 	switch ev.T {
@@ -278,9 +304,20 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 			break
 		}
 		m.setStatus(errorText(ev.Error))
+		if p != nil {
+			m.restore(p.text) // never lose what the user wrote
+		}
 	}
 	m.clampSel()
 	return tea.Batch(cmds...)
+}
+
+// restore puts a message that failed to send back into the input (ahead of any new draft).
+func (m *Model) restore(text string) {
+	if cur := m.input.Value(); cur != "" {
+		text += "\n" + cur
+	}
+	m.input.SetValue(text)
 }
 
 func (m *Model) recipientNames(conv string) []string {
@@ -345,7 +382,7 @@ func (m *Model) convs() []string {
 
 func (m *Model) switchConv(conv string) {
 	m.st.SetActive(conv)
-	m.threadRoot = ""
+	m.threadRoot, m.toMain = "", false
 	m.selMain, m.selThread = -1, -1
 	m.pane = paneInput
 	m.input.Focus()
@@ -406,7 +443,7 @@ func (m *Model) openThread(msg chat.Msg) {
 	if msg.ParentID != "" {
 		id = msg.ParentID
 	}
-	m.threadRoot = id
+	m.threadRoot, m.toMain = id, false
 	m.selThread = -1
 	m.resize()
 }
@@ -456,10 +493,15 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keyFocus:
 		m.cycleFocus()
 		return m, nil
+	case keyTarget:
+		if m.threadRoot != "" {
+			m.toMain = !m.toMain
+		}
+		return m, nil
 	case keyEsc:
 		switch {
 		case m.threadRoot != "":
-			m.threadRoot = ""
+			m.threadRoot, m.toMain = "", false
 			m.resize()
 		}
 		m.pane = paneInput
@@ -467,7 +509,7 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.pane != paneInput {
-		return m.listKey(s)
+		return m.listKey(k)
 	}
 	if s == keyEnter {
 		return m, m.submit()
@@ -500,7 +542,8 @@ func (m *Model) cycleFocus() {
 	}
 }
 
-func (m *Model) listKey(s string) (tea.Model, tea.Cmd) {
+func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	s := k.String()
 	sel := &m.selMain
 	n := len(m.st.Timeline(m.st.Active()))
 	if m.pane == paneThread {
@@ -529,6 +572,15 @@ func (m *Model) listKey(s string) (tea.Model, tea.Cmd) {
 		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
 			m.openThread(msg)
 		}
+	default:
+		// Anything else that types a character belongs to the input: refocus it and forward.
+		if k.Type == tea.KeyRunes || k.Type == tea.KeySpace {
+			m.pane = paneInput
+			m.input.Focus()
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(k)
+			return m, cmd
+		}
 	}
 	return m, nil
 }
@@ -545,7 +597,11 @@ func (m *Model) submit() tea.Cmd {
 		m.setStatus("Message is longer than 4000 characters.")
 		return nil
 	}
-	p := &pendingSend{conv: m.st.Active(), parent: m.threadRoot, text: text}
+	parent := ""
+	if m.threadRoot != "" && !m.toMain {
+		parent = m.threadRoot
+	}
+	p := &pendingSend{conv: m.st.Active(), parent: parent, text: text}
 	if m.send(p) {
 		m.input.Reset()
 		m.lastTyping = time.Time{}
@@ -687,6 +743,15 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case zone.Get("thr:" + v.ID).InBounds(msg):
 			m.openThread(v)
 			return m, nil
+		}
+	}
+	if m.threadRoot != "" && msg.Y < m.h-1 {
+		sideW, chatW, _ := m.layout()
+		switch {
+		case msg.X >= sideW && msg.X < sideW+chatW:
+			m.toMain = true // clicking the main chat makes it the post target
+		case msg.X >= sideW+chatW:
+			m.toMain = false
 		}
 	}
 	return m, nil

@@ -108,21 +108,26 @@ export class Auth {
 
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const hash = await pbkdf2(pin, salt);
-    // Everything below is synchronous: the invite is consumed in the same step that creates the user.
-    const used = this.sql.exec("SELECT code FROM invites WHERE code = ?", String(b.invite));
-    if (used.length === 0) throw new ApiError(403, "invalid_invite");
-    this.sql.exec("DELETE FROM invites WHERE code = ?", String(b.invite));
-    if (inv.username !== null && existing) {
-      this.sql.exec(
-        "UPDATE users SET pin_hash=?, pin_salt=?, public_key=?, fails=0, locks=0, locked_until=0 WHERE username=?",
-        hash, hex(salt), publicKey, username,
-      );
-    } else {
-      this.sql.exec(
-        "INSERT INTO users(username, display_name, pin_hash, pin_salt, public_key, joined_at) VALUES (?,?,?,?,?,?)",
-        username, displayName, hash, hex(salt), publicKey, this.now(),
-      );
-    }
+    const invite = String(b.invite);
+    // After the await, re-check everything and write atomically: a conflict leaves the invite unused.
+    this.sql.tx(() => {
+      const cur = this.sql.exec<{ username: string | null }>("SELECT username FROM invites WHERE code = ?", invite)[0];
+      if (!cur || (cur.username !== null && cur.username !== username)) throw new ApiError(403, "invalid_invite");
+      const user = this.sql.exec<UserRow>("SELECT * FROM users WHERE username = ?", username)[0];
+      if (cur.username === null && user) throw new ApiError(409, "username_taken");
+      this.sql.exec("DELETE FROM invites WHERE code = ?", invite);
+      if (cur.username !== null && user) {
+        this.sql.exec(
+          "UPDATE users SET pin_hash=?, pin_salt=?, public_key=?, fails=0, locks=0, locked_until=0 WHERE username=?",
+          hash, hex(salt), publicKey, username,
+        );
+      } else {
+        this.sql.exec(
+          "INSERT INTO users(username, display_name, pin_hash, pin_salt, public_key, joined_at) VALUES (?,?,?,?,?,?)",
+          username, displayName, hash, hex(salt), publicKey, this.now(),
+        );
+      }
+    });
     const row = this.sql.exec<UserRow>("SELECT * FROM users WHERE username = ?", username)[0];
     return { token: await this.newSession(username), user: userView(row, false) };
   }
@@ -135,16 +140,16 @@ export class Auth {
     const t = this.now();
     if (row.locked_until > t) throw new ApiError(423, "locked", { until: row.locked_until });
     const ok = validPin(pin) && constEq(await pbkdf2(pin, fromHex(row.pin_salt)), row.pin_hash);
+    // Everything below is synchronous, so concurrent attempts cannot lose updates.
+    const t2 = this.now();
+    const cur = this.sql.exec<{ locked_until: number }>("SELECT locked_until FROM users WHERE username = ?", username)[0];
+    if (cur && cur.locked_until > t2) throw new ApiError(423, "locked", { until: cur.locked_until });
     if (!ok) {
-      let fails = row.fails + 1;
-      let locks = row.locks;
-      let until = 0;
-      if (fails >= MAX_FAILS) {
-        locks += 1;
-        fails = 0;
-        until = t + LOCK_BASE_MS * 2 ** (locks - 1);
+      const r = this.sql.exec<{ fails: number }>("UPDATE users SET fails = fails + 1 WHERE username = ? RETURNING fails", username)[0];
+      if (r && r.fails >= MAX_FAILS) {
+        const l = this.sql.exec<{ locks: number }>("UPDATE users SET locks = locks + 1, fails = 0 WHERE username = ? RETURNING locks", username)[0];
+        this.sql.exec("UPDATE users SET locked_until = ? WHERE username = ?", t2 + LOCK_BASE_MS * 2 ** (l.locks - 1), username);
       }
-      this.sql.exec("UPDATE users SET fails=?, locks=?, locked_until=? WHERE username=?", fails, locks, until, username);
       throw new ApiError(401, "bad_credentials");
     }
     this.sql.exec("UPDATE users SET fails=0, locks=0, locked_until=0 WHERE username=?", username);

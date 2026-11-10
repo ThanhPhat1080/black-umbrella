@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/base64"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,5 +238,85 @@ func TestUserEventAndUndecryptable(t *testing.T) {
 	st.Apply(proto.Event{T: "user", User: &nu})
 	if st.Users()["bob"].DisplayName != "Robert" || st.Users()["bob"].Online {
 		t.Fatal("user not updated")
+	}
+}
+
+func TestSanitize(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"\x1b]0;X\x07\x1b[2Jhi", "hi"},
+		{"a\x1b[31mred\x1b[0m", "ared"},
+		{"x\x1b]8;;http://e\x1b\\link\x1b]8;;\x1b\\", "xlink"},
+		{"bell\x07 nul\x00 del\x7f c1\u009b31m", "bell nul del c131m"},
+		{"tab\there", "tab    here"},
+		{"line1\r\nline2", "line1\nline2"},
+		{"Tiếng Việt 🌂", "Tiếng Việt 🌂"},
+		{"rtl‮evil", "rtlevil"},
+	}
+	for _, c := range cases {
+		if got := Sanitize(c.in); got != c.want {
+			t.Errorf("Sanitize(%q) = %q want %q", c.in, got, c.want)
+		}
+	}
+	if got := SanitizeLine("a\nb\x1b[1mc"); got != "a bc" {
+		t.Errorf("SanitizeLine = %q", got)
+	}
+}
+
+func TestHostileTextAndNamesAreSanitized(t *testing.T) {
+	st, me, bob, _, _ := setup(t)
+	evil := bob.user(true)
+	evil.DisplayName = "Bob\x1b[2J\x07"
+	st.Apply(proto.Event{T: "user", User: &evil})
+	m := msgFor(t, bob, "me", []actor{me, bob}, "hell", "", "\x1b]0;X\x07\x1b[2Jhi")
+	st.Apply(proto.Event{T: "msg", Message: &m})
+	if got := st.Timeline("hell")[0].Text; got != "hi" {
+		t.Fatalf("%q", got)
+	}
+	if got := st.DisplayName("bob"); got != "Bob" {
+		t.Fatalf("%q", got)
+	}
+	for _, e := range st.Sidebar() {
+		if strings.ContainsAny(e.Label, "\x1b\x07") {
+			t.Fatalf("label %q", e.Label)
+		}
+	}
+}
+
+func TestOldMessagesOpenWithSenderKeyAfterRekey(t *testing.T) {
+	st, me, bob, _, _ := setup(t)
+	m := msgFor(t, bob, "me", []actor{me, bob}, "hell", "", "from the old key")
+	m.SenderKey = base64.StdEncoding.EncodeToString(bob.kp.Public[:])
+	newBob := newActor(t, "bob")
+	nu := newBob.user(true)
+	st.Apply(proto.Event{T: "user", User: &nu}) // bob re-registered with a new key
+	st.Apply(proto.Event{T: "msg", Message: &m})
+	if tl := st.Timeline("hell"); len(tl) != 1 || tl[0].Undecryptable || tl[0].Text != "from the old key" {
+		t.Fatalf("%+v", tl)
+	}
+	m2 := m
+	m2.ID = "zz"
+	m2.SenderKey = "" // fallback to the sender's current key: fails here, must not crash
+	st.Apply(proto.Event{T: "msg", Message: &m2})
+}
+
+func TestHelloAfterReconnectCountsNewMessages(t *testing.T) {
+	st, me, bob, _, _ := setup(t)
+	all := []actor{me, bob}
+	users := []proto.User{me.user(true), bob.user(true)}
+	old := msgFor(t, bob, "me", all, "hell", "", "old")
+	st.Apply(proto.Event{T: "hello", Me: "me", Users: users, Messages: []proto.Message{old}})
+	if unread(st, "hell") != 0 {
+		t.Fatal("first snapshot counted")
+	}
+	st.SetActive("dm:bob|me")
+	missed := msgFor(t, bob, "me", all, "hell", "", "while you slept @me")
+	own := msgFor(t, me, "me", all, "hell", "", "mine")
+	fx := st.Apply(proto.Event{T: "hello", Me: "me", Users: users, Messages: []proto.Message{old, missed, own}})
+	if !fx.Bell || unread(st, "hell") != 1 {
+		t.Fatalf("bell=%v unread=%d", fx.Bell, unread(st, "hell"))
+	}
+	fx = st.Apply(proto.Event{T: "hello", Me: "me", Users: users, Messages: []proto.Message{old, missed, own}})
+	if fx.Bell || unread(st, "hell") != 1 {
+		t.Fatalf("recounted: bell=%v unread=%d", fx.Bell, unread(st, "hell"))
 	}
 }

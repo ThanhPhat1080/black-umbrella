@@ -134,3 +134,33 @@ func TestDialReceivesEventsAndSends(t *testing.T) {
 		t.Fatal("expected dial error")
 	}
 }
+
+func TestSendDoesNotHTMLEscape(t *testing.T) {
+	got := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		_, data, _ := c.Read(r.Context())
+		got <- string(data)
+		_ = c.Close(websocket.StatusCode(4001), "revoked")
+	}))
+	defer srv.Close()
+	conn, err := Dial(context.Background(), srv.URL, "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.Send(proto.NewName("a<b>&c"))
+	if s := <-got; s != `{"t":"name","displayName":"a<b>&c"}` {
+		t.Fatal(s)
+	}
+	// the close code is exposed once the event channel is closed
+	for range conn.Events() {
+	}
+	if conn.CloseCode() != 4001 {
+		t.Fatalf("close code %d", conn.CloseCode())
+	}
+}

@@ -43,6 +43,9 @@ type State struct {
 	unread map[string]int
 	typing map[string]map[string]time.Time // conv -> user -> when
 	active string
+
+	newest   time.Time
+	hadHello bool
 }
 
 func New(me string, kp e2e.KeyPair) *State {
@@ -63,9 +66,11 @@ func DMConv(a, b string) string {
 	return "dm:" + a + "|" + b
 }
 
-func pubKey(u proto.User) ([32]byte, bool) {
+func pubKey(u proto.User) ([32]byte, bool) { return decodeKey(u.PublicKey) }
+
+func decodeKey(b64 string) ([32]byte, bool) {
 	var k [32]byte
-	b, err := base64.StdEncoding.DecodeString(u.PublicKey)
+	b, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil || len(b) != 32 {
 		return k, false
 	}
@@ -74,17 +79,19 @@ func pubKey(u proto.User) ([32]byte, bool) {
 }
 
 func (s *State) decrypt(m proto.Message) *Msg {
-	out := &Msg{ID: m.ID, Conv: m.Conv, Sender: m.Sender, ParentID: m.ParentID, Kept: m.Kept, CreatedAt: time.UnixMilli(m.CreatedAt)}
+	out := &Msg{ID: m.ID, Conv: m.Conv, Sender: SanitizeLine(m.Sender), ParentID: m.ParentID, Kept: m.Kept, CreatedAt: time.UnixMilli(m.CreatedAt)}
 	var sp [32]byte
 	ok := false
 	if m.Sender == s.me {
 		sp, ok = s.kp.Public, true
+	} else if k, good := decodeKey(m.SenderKey); good {
+		sp, ok = k, true // the key the sender had when sending (survives a later re-registration)
 	} else if u, found := s.users[m.Sender]; found {
 		sp, ok = pubKey(u)
 	}
 	if ok {
 		if text, err := e2e.Open(m.Nonce, m.CT, m.Key, s.kp, sp); err == nil {
-			out.Text = text
+			out.Text = Sanitize(text)
 			return out
 		}
 	}
@@ -110,15 +117,26 @@ func (s *State) Apply(ev proto.Event) Effects {
 	var fx Effects
 	switch ev.T {
 	case "hello":
+		known, newest, had := s.msgs, s.newest, s.hadHello
 		s.users = map[string]proto.User{}
 		s.msgs = map[string]*Msg{}
 		s.typing = map[string]map[string]time.Time{}
 		for _, u := range ev.Users {
+			u = cleanUser(u)
 			s.users[u.Username] = u
 		}
 		for _, m := range ev.Messages {
-			s.msgs[m.ID] = s.decrypt(m)
+			dm := s.decrypt(m)
+			s.msgs[m.ID] = dm
+			if dm.CreatedAt.After(s.newest) {
+				s.newest = dm.CreatedAt
+			}
+			// A reconnect snapshot can contain messages we never saw live: count those as new.
+			if _, seen := known[m.ID]; had && !seen && dm.CreatedAt.After(newest) && dm.Sender != s.me {
+				s.noteIncoming(dm, &fx)
+			}
 		}
+		s.hadHello = true
 	case "msg":
 		if ev.Message == nil {
 			break
@@ -131,16 +149,13 @@ func (s *State) Apply(ev proto.Event) Effects {
 		if m.Sender == s.me {
 			break
 		}
+		if m.CreatedAt.After(s.newest) {
+			s.newest = m.CreatedAt
+		}
 		if t := s.typing[m.Conv]; t != nil {
 			delete(t, m.Sender)
 		}
-		mention := m.Conv == "hell" && !m.Undecryptable && Mentions(m.Text, s.me)
-		if mention {
-			fx.Bell = true
-		}
-		if m.Conv != s.active {
-			s.unread[m.Conv]++
-		}
+		s.noteIncoming(m, &fx)
 	case "kept":
 		if m, ok := s.msgs[ev.ID]; ok {
 			m.Kept = ev.Kept
@@ -159,10 +174,21 @@ func (s *State) Apply(ev proto.Event) Effects {
 		s.typing[ev.Conv][ev.Username] = s.Now()
 	case "user":
 		if ev.User != nil {
-			s.users[ev.User.Username] = *ev.User
+			u := cleanUser(*ev.User)
+			s.users[u.Username] = u
 		}
 	}
 	return fx
+}
+
+// noteIncoming does the unread / mention bookkeeping for a message from someone else.
+func (s *State) noteIncoming(m *Msg, fx *Effects) {
+	if m.Conv == "hell" && !m.Undecryptable && Mentions(m.Text, s.me) {
+		fx.Bell = true
+	}
+	if m.Conv != s.active {
+		s.unread[m.Conv]++
+	}
 }
 
 func (s *State) replyCounts() map[string]int {
@@ -320,4 +346,10 @@ func (s *State) DisplayName(username string) string {
 		return u.DisplayName
 	}
 	return username
+}
+
+func cleanUser(u proto.User) proto.User {
+	u.Username = SanitizeLine(u.Username)
+	u.DisplayName = SanitizeLine(u.DisplayName)
+	return u
 }

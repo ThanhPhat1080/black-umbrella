@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"github.com/ThanhPhat1080/black-umbrella/client/internal/api"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
 	"os"
 	"strings"
@@ -171,11 +173,13 @@ func TestViewFitsTerminalWithVietnameseAndEmoji(t *testing.T) {
 type fakeLink struct {
 	sent   []any
 	closed int
+	code   int
 }
 
 func (f *fakeLink) Send(v any) error           { f.sent = append(f.sent, v); return nil }
 func (f *fakeLink) Close()                     { f.closed++ }
 func (f *fakeLink) Events() <-chan proto.Event { return nil }
+func (f *fakeLink) CloseCode() int             { return f.code }
 
 func (f *fakeLink) sends() (out []proto.Send) {
 	for _, v := range f.sent {
@@ -271,5 +275,184 @@ func TestSlashCommandsAndLimits(t *testing.T) {
 	}
 	if m.input.CharLimit != 4000 {
 		t.Fatal("limit")
+	}
+}
+
+func sealedMsg(t *testing.T, from, to e2e.KeyPair, fromName, id, conv, parent, text string) proto.Message {
+	t.Helper()
+	s, err := e2e.Seal(text, from, map[string][32]byte{"me": to.Public, fromName: from.Public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proto.Message{ID: id, Conv: conv, Sender: fromName, ParentID: parent, CreatedAt: time.Now().UnixMilli(), Nonce: s.Nonce, CT: s.CT, Key: s.Keys["me"]}
+}
+
+func noEscapes(t *testing.T, what, s string) {
+	t.Helper()
+	if strings.ContainsAny(s, "\x1b\a\x00") {
+		t.Fatalf("%s contains terminal control bytes: %q", what, s)
+	}
+}
+
+// Review: terminal escape injection through message text and display names.
+func TestHostileTextAndNamesNeverReachTheScreen(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	evil := "Bob\x1b[2J\x1b]0;pwn\x07"
+	m.onEvent(proto.Event{T: "user", User: &proto.User{Username: "bob", DisplayName: evil, PublicKey: base64.StdEncoding.EncodeToString(bob.Public[:]), Online: true}})
+	pm := sealedMsg(t, bob, me, "bob", "e1", "hell", "", "\x1b]0;X\x07\x1b[2Jhi \x1b[31mred")
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	noEscapes(t, "render", zone.Scan(strings.Join(renderMessage(m.st.Timeline("hell")[0], msgView{Name: m.nameOf("bob"), Width: 60}), "\n")))
+	noEscapes(t, "view", m.View())
+	m.overlay, m.profileUser = overlayProfile, "bob"
+	noEscapes(t, "profile", m.View())
+	if !strings.Contains(m.View(), "hi red") && m.overlay == overlayNone {
+		t.Fatal("body missing")
+	}
+}
+
+// Review: one width function (runewidth) everywhere; no line may overflow the terminal.
+func TestEveryLineFitsByRunewidth(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	for i, text := range []string{"(☞ﾟヮﾟ)☞ ☜(ﾟヮﾟ☜) (ﾉ◕ヮ◕)ﾉ*:･ﾟ✧", "Tiếng Việt có dấu ạ ( ˘ ³˘)♥ ʕ•ᴥ•ʔ 🌂", strings.Repeat("ﾟ✧ ", 40)} {
+		pm := sealedMsg(t, bob, me, "bob", string(rune('a'+i)), "hell", "", text)
+		m.onEvent(proto.Event{T: "msg", Message: &pm})
+	}
+	check := func(label string, w, h int) {
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) > h {
+			t.Fatalf("%s %dx%d: %d lines", label, w, h, len(lines))
+		}
+		for _, l := range lines {
+			if rw := runewidth.StringWidth(ansi.Strip(l)); rw > w {
+				t.Fatalf("%s %dx%d: width %d: %q", label, w, h, rw, l)
+			}
+		}
+	}
+	for _, size := range [][2]int{{120, 40}, {100, 30}, {80, 24}, {60, 20}, {40, 12}} {
+		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m.overlay, m.threadRoot = overlayNone, ""
+		check("main", size[0], size[1])
+		m.threadRoot = "c"
+		m.resize()
+		check("thread", size[0], size[1])
+		m.threadRoot = ""
+		m.overlay, m.pickIdx = overlayPicker, 7
+		check("picker", size[0], size[1])
+		m.overlay, m.profileUser = overlayProfile, "bob"
+		check("profile", size[0], size[1])
+		m.overlay = overlayNone
+	}
+}
+
+func TestStyleBodyDoesNotStylePunctuationAfterLink(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(old)
+	got := styleBody("see https://a.b/c, ok (https://x.y/z).", "me")
+	if !strings.Contains(got, linkSt.Render("https://a.b/c")+",") || !strings.Contains(got, linkSt.Render("https://x.y/z")+").") {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestListFocusTypingGoesToInput(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	m.pane = paneMain
+	m.input.Blur()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.pane != paneInput || m.input.Value() != "x" {
+		t.Fatalf("pane=%v value=%q", m.pane, m.input.Value())
+	}
+	// defined hotkeys stay hotkeys
+	m.pane = paneMain
+	m.input.Blur()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	if m.pane != paneMain {
+		t.Fatal("j should stay a hotkey")
+	}
+}
+
+func TestThreadReplyTargetIsExplicit(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	f := &fakeLink{}
+	m.conn = f
+	pm := sealedMsg(t, bob, me, "bob", "root1", "hell", "", "root")
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	m.openThread(m.st.Timeline("hell")[0])
+	if v := m.View(); !strings.Contains(v, "Replying in thread") {
+		t.Fatalf("no indicator:\n%s", v)
+	}
+	typeAndEnter(m, "in thread")
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	if v := m.View(); strings.Contains(v, "Replying in thread") || !strings.Contains(v, "main chat") {
+		t.Fatalf("indicator did not switch:\n%s", v)
+	}
+	typeAndEnter(m, "in main")
+	s := f.sends()
+	if len(s) != 2 || s[0].ParentID != "root1" || s[1].ParentID != "" {
+		t.Fatalf("%+v", s)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	typeAndEnter(m, "after close")
+	if s = f.sends(); s[2].ParentID != "" || m.threadRoot != "" {
+		t.Fatal("thread should be closed and target main")
+	}
+}
+
+func TestSendErrorRestoresText(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	f := &fakeLink{}
+	m.conn = f
+	typeAndEnter(m, "Tiếng Việt dài")
+	if m.input.Value() != "" {
+		t.Fatal("input should clear on send")
+	}
+	for _, code := range []string{"too_large", "bad_parent", "bad_conv"} {
+		m.input.Reset()
+		typeAndEnter(m, "keep me "+code)
+		ref := f.sends()[len(f.sends())-1].Ref
+		m.onEvent(proto.Event{T: "error", Ref: ref, Error: code})
+		if m.input.Value() != "keep me "+code {
+			t.Fatalf("%s: input %q", code, m.input.Value())
+		}
+	}
+	// with text already typed, the failed message is put back in front of it
+	typeAndEnter(m, "first")
+	ref := f.sends()[len(f.sends())-1].Ref
+	m.input.SetValue("draft")
+	m.onEvent(proto.Event{T: "error", Ref: ref, Error: "too_large"})
+	if m.input.Value() != "first\ndraft" {
+		t.Fatalf("%q", m.input.Value())
+	}
+}
+
+func TestRevokedSessionStopsReconnecting(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	f := &fakeLink{code: 4001}
+	m.conn = f
+	_, cmd := m.Update(connClosedMsg{f})
+	if cmd != nil || m.reconnecting || !strings.Contains(m.fatal, "revoked") {
+		t.Fatalf("cmd=%v reconnecting=%v fatal=%q", cmd != nil, m.reconnecting, m.fatal)
+	}
+	if v := m.View(); !strings.Contains(v, "revoked") || strings.Contains(v, "Reconnecting") {
+		t.Fatalf("status:\n%s", v)
+	}
+}
+
+func TestReconnectGivesUpOnAuthFailures(t *testing.T) {
+	for code, want := range map[string]string{"bad_credentials": "register", "locked": "locked until"} {
+		m, _, _ := newTestModel(t)
+		m.reconnect = func(context.Context) (*api.Conn, error) {
+			return nil, &api.APIError{Status: 401, Code: code, Until: time.Now().Add(time.Hour).UnixMilli()}
+		}
+		msg := m.doReconnect()()
+		fm, ok := msg.(fatalMsg)
+		if !ok {
+			t.Fatalf("%s: got %T", code, msg)
+		}
+		m.Update(fm)
+		if !strings.Contains(m.fatal, want) || m.reconnecting {
+			t.Fatalf("%s: fatal=%q", code, m.fatal)
+		}
 	}
 }

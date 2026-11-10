@@ -56,3 +56,21 @@ describe("sha256", () => {
       expect(sha256Hex(s)).toBe(createHash("sha256").update(s).digest("hex"));
   });
 });
+
+describe("display name control chars", () => {
+  it("rejects control characters and newlines", () => {
+    for (const s of ["a\nb", "a\x1bb", "a\x07", "a\u0085b", "a b", "a\x7fb"])
+      expect(normalizeDisplayName(s), JSON.stringify(s)).toBeNull();
+    expect(normalizeDisplayName("Phát 🌂")).toBe("Phát 🌂");
+  });
+});
+
+describe("schema sender_key migration", () => {
+  it("adds sender_key to an old messages table", () => {
+    const s = memorySql();
+    s.exec("CREATE TABLE messages(id TEXT PRIMARY KEY, conv TEXT NOT NULL, sender TEXT NOT NULL, parent_id TEXT, created_at INTEGER NOT NULL, kept INTEGER NOT NULL DEFAULT 0, nonce TEXT NOT NULL, ct TEXT NOT NULL)");
+    migrate(s);
+    migrate(s);
+    expect(s.exec<{ name: string }>("PRAGMA table_info(messages)").map((c) => c.name)).toContain("sender_key");
+  });
+});

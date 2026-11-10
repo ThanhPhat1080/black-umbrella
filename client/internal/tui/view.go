@@ -113,14 +113,28 @@ func splitTokens(s string) []string {
 }
 
 var mentionRe = regexp.MustCompile(`@[A-Za-z0-9_]+`)
-var urlRe = regexp.MustCompile(`https?://\S+`)
 
 func styleBody(line, me string) string {
-	line = urlRe.ReplaceAllStringFunc(line, func(u string) string { return linkSt.Render(u) })
-	if me == "" {
-		return line
+	var out strings.Builder
+	rest := line
+	for _, u := range links.Find(line) {
+		i := strings.Index(rest, u)
+		if i < 0 {
+			continue
+		}
+		out.WriteString(styleMentions(rest[:i], me))
+		out.WriteString(linkSt.Render(u))
+		rest = rest[i+len(u):]
 	}
-	return mentionRe.ReplaceAllStringFunc(line, func(m string) string {
+	out.WriteString(styleMentions(rest, me))
+	return out.String()
+}
+
+func styleMentions(s, me string) string {
+	if me == "" {
+		return s
+	}
+	return mentionRe.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.EqualFold(m[1:], me) {
 			return mentionSt.Render(m)
 		}
@@ -183,14 +197,14 @@ func renderMessage(m chat.Msg, v msgView) []string {
 		btns = append(btns, zone.Mark("thr:"+m.ID, label))
 	}
 	btnStr := strings.Join(btns, "")
-	btnW := lipgloss.Width(btnStr)
+	btnW := width(btnStr)
 
 	last := ""
 	if n := len(body); n > 0 {
 		last = body[n-1]
 	}
 	for i, b := range body {
-		if i == len(body)-1 && lipgloss.Width(b)+2+btnW <= v.Width-3 {
+		if i == len(body)-1 && width(b)+2+btnW <= v.Width-3 {
 			b += "  " + btnStr
 			btnStr = ""
 		}
@@ -254,7 +268,45 @@ func window(blocks [][]string, sel, h int) []string {
 	return out
 }
 
+// width is THE display-width function: runewidth on the visible text (ANSI sequences and
+// bubblezone markers removed). Everything that measures, pads or cuts lines uses it, so the
+// layout agrees with terminals even where lipgloss/uniseg would not (e.g. halfwidth kana).
+func width(s string) int { return runewidth.StringWidth(ansi.Strip(s)) }
+
 func truncate(s string, w int) string { return runewidth.Truncate(s, w, "…") }
+
+var escSeqRe = regexp.MustCompile(`\x1b\[[0-9;:?<=>]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]`)
+
+// cut limits s to w display cells, keeping escape sequences (so styles still close) but
+// dropping text beyond the limit.
+func cut(s string, w int) string {
+	if width(s) <= w {
+		return s
+	}
+	var out strings.Builder
+	used := 0
+	pos := 0
+	emit := func(text string) {
+		if text == "" || used >= w {
+			return
+		}
+		t := runewidth.Truncate(text, w-used, "")
+		out.WriteString(t)
+		used += runewidth.StringWidth(t)
+	}
+	for _, loc := range escSeqRe.FindAllStringIndex(s, -1) {
+		emit(s[pos:loc[0]])
+		out.WriteString(s[loc[0]:loc[1]])
+		pos = loc[1]
+	}
+	emit(s[pos:])
+	return out.String()
+}
+
+func padTo(s string, w int) string {
+	s = cut(s, w)
+	return s + strings.Repeat(" ", maxInt(0, w-width(s)))
+}
 
 func humanAgo(d time.Duration) string {
 	switch {
@@ -277,10 +329,7 @@ func fit(lines []string, w, h int) string {
 		if i < len(lines) {
 			l = lines[i]
 		}
-		if lipgloss.Width(l) > w {
-			l = ansi.Truncate(l, w, "")
-		}
-		out = append(out, l+strings.Repeat(" ", maxInt(0, w-lipgloss.Width(l))))
+		out = append(out, padTo(l, w))
 	}
 	return strings.Join(out, "\n")
 }
@@ -355,15 +404,51 @@ func (m *Model) viewSidebar(w, h int) string {
 	if off > len(lines) {
 		off = len(lines)
 	}
-	return paneBox(fit(lines[off:], inner, h-2), false)
+	return paneBox(fit(lines[off:], inner, h-2), inner, false)
 }
 
-func paneBox(content string, focused bool) string {
+// paneBox draws a rounded border by hand (lipgloss would measure widths its own way).
+// content is lines already fitted to exactly innerW cells.
+func paneBox(content string, innerW int, focused bool) string {
 	c := lipgloss.Color("240")
 	if focused {
 		c = lipgloss.Color("39")
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c).Render(content)
+	st := lipgloss.NewStyle().Foreground(c)
+	var out []string
+	out = append(out, st.Render("╭"+strings.Repeat("─", innerW)+"╮"))
+	for _, l := range strings.Split(content, "\n") {
+		out = append(out, st.Render("│")+padTo(l, innerW)+st.Render("│"))
+	}
+	out = append(out, st.Render("╰"+strings.Repeat("─", innerW)+"╯"))
+	return strings.Join(out, "\n")
+}
+
+// joinCols places blocks side by side, row by row.
+func joinCols(cols []string) string {
+	split := make([][]string, len(cols))
+	widths := make([]int, len(cols))
+	rows := 0
+	for i, c := range cols {
+		split[i] = strings.Split(c, "\n")
+		for _, l := range split[i] {
+			widths[i] = maxInt(widths[i], width(l))
+		}
+		rows = maxInt(rows, len(split[i]))
+	}
+	out := make([]string, rows)
+	for r := 0; r < rows; r++ {
+		var sb strings.Builder
+		for i := range split {
+			l := ""
+			if r < len(split[i]) {
+				l = split[i][r]
+			}
+			sb.WriteString(padTo(l, widths[i]))
+		}
+		out[r] = sb.String()
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m *Model) viewChat(w, h int) string {
@@ -378,6 +463,15 @@ func (m *Model) viewChat(w, h int) string {
 		title += "  " + dim.Italic(true).Render(strings.Join(names, ", ")+" is typing…")
 	}
 	inH := m.input.Height() + 1
+	var target string
+	if m.threadRoot != "" {
+		inH++
+		if m.toMain {
+			target = accent.Render("Posting to main chat") + dim.Render(" · Ctrl+T: reply in thread")
+		} else {
+			target = accent.Render("Replying in thread") + dim.Render(" · Esc to close · Ctrl+T: main chat")
+		}
+	}
 	bodyH := h - 2 - 1 - inH
 	if bodyH < 1 {
 		bodyH = 1
@@ -399,9 +493,12 @@ func (m *Model) viewChat(w, h int) string {
 	}
 	plus := zone.Mark("plus", accent.Render("[+]"))
 	foot := plus + dim.Render(" kaomoji  ") + counter
+	if target != "" {
+		lines = append(lines, target)
+	}
 	lines = append(lines, strings.Split(m.input.View(), "\n")...)
 	lines = append(lines, foot)
-	return paneBox(fit(lines, inner, h-2), m.pane != paneThread)
+	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread)
 }
 
 func (m *Model) viewThread(w, h int) string {
@@ -429,13 +526,15 @@ func (m *Model) viewThread(w, h int) string {
 	}
 	lines := []string{nameSt.Render("Thread") + dim.Render("  (Esc to close)")}
 	lines = append(lines, window(blocks, bsel, h-3)...)
-	return paneBox(fit(lines, inner, h-2), m.pane == paneThread)
+	return paneBox(fit(lines, inner, h-2), inner, m.pane == paneThread)
 }
 
 func (m *Model) viewStatus() string {
 	left := accent.Render("Umbrella") + dim.Render(" @"+m.st.Me()+" · ")
 	var right string
 	switch {
+	case m.fatal != "":
+		right = errSt.Render(m.fatal)
 	case m.reconnecting:
 		right = errSt.Render("Reconnecting…")
 	case time.Now().Before(m.statusUntil):
@@ -447,38 +546,34 @@ func (m *Model) viewStatus() string {
 }
 
 func (m *Model) overlayView() string {
-	var box string
+	var lines []string
 	switch m.overlay {
 	case overlayPicker:
 		const cell = 17
-		var rows []string
+		lines = append(lines, nameSt.Render("Kaomoji")+dim.Render("  arrows + Enter to insert (also copies), Esc to cancel"), "")
 		for r := 0; r*pickerCols < len(kaomoji.All); r++ {
-			var cells []string
+			var sb strings.Builder
 			for c := 0; c < pickerCols; c++ {
 				i := r*pickerCols + c
 				if i >= len(kaomoji.All) {
 					break
 				}
-				k := truncate(kaomoji.All[i], cell-2)
-				k += strings.Repeat(" ", maxInt(0, cell-2-runewidth.StringWidth(k)))
-				st := lipgloss.NewStyle().Padding(0, 1)
+				text := " " + padTo(truncate(kaomoji.All[i], cell-2), cell-2) + " "
 				if i == m.pickIdx {
-					st = st.Reverse(true)
+					text = lipgloss.NewStyle().Reverse(true).Render(text)
 				}
-				cells = append(cells, zone.Mark(fmt.Sprintf("kao:%d", i), st.Render(k)))
+				sb.WriteString(zone.Mark(fmt.Sprintf("kao:%d", i), text))
 			}
-			rows = append(rows, strings.Join(cells, ""))
+			lines = append(lines, sb.String())
 		}
-		box = nameSt.Render("Kaomoji") + dim.Render("  arrows + Enter to insert (also copies), Esc to cancel") + "\n\n" + strings.Join(rows, "\n")
 	case overlayProfile:
 		u, ok := m.st.Users()[m.profileUser]
 		if !ok {
 			return ""
 		}
 		col := lipgloss.NewStyle().Foreground(lipgloss.Color(avatar.Color(u.Username)))
-		var av []string
 		for _, l := range avatar.Render(u.Username) {
-			av = append(av, col.Render(l))
+			lines = append(lines, col.Render(l))
 		}
 		seen := "online"
 		if !u.Online {
@@ -487,30 +582,59 @@ func (m *Model) overlayView() string {
 				seen = "last seen " + humanAgo(time.Since(time.UnixMilli(*u.LastSeen)))
 			}
 		}
-		info := []string{nameSt.Render(u.DisplayName), dim.Render("@" + u.Username),
-			"joined " + time.UnixMilli(u.JoinedAt).Local().Format("2 Jan 2006"), seen}
-		box = strings.Join(av, "\n") + "\n\n" + strings.Join(info, "\n") + "\n\n" + dim.Render("press any key")
+		lines = append(lines, "", nameSt.Render(u.DisplayName), dim.Render("@"+u.Username),
+			"joined "+time.UnixMilli(u.JoinedAt).Local().Format("2 Jan 2006"), seen, "", dim.Render("press any key"))
 	}
-	return lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center,
-		lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("39")).Padding(1, 2).Render(box))
+	inner := 0
+	for _, l := range lines {
+		inner = maxInt(inner, width(l))
+	}
+	inner = minInt(inner, maxInt(1, m.w-6))
+	fitted := make([]string, len(lines)+2)
+	copy(fitted[1:], lines)
+	boxed := strings.Split(paneBox(fit(fitted, inner+2, len(fitted)), inner+2, true), "\n")
+	if len(boxed) > m.h {
+		boxed = boxed[:m.h]
+	}
+	top := (m.h - len(boxed)) / 2
+	left := strings.Repeat(" ", maxInt(0, (m.w-width(boxed[0]))/2))
+	out := make([]string, 0, m.h)
+	for i := 0; i < top; i++ {
+		out = append(out, "")
+	}
+	for _, l := range boxed {
+		out = append(out, left+l)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m *Model) View() string {
 	if m.w == 0 || m.h == 0 {
 		return ""
 	}
+	var body string
 	if m.overlay != overlayNone {
-		return zone.Scan(m.overlayView())
+		body = m.overlayView()
+	} else {
+		sideW, chatW, threadW := m.layout()
+		ph := m.h - 1
+		var cols []string
+		if sideW > 0 {
+			cols = append(cols, m.viewSidebar(sideW, ph))
+		}
+		cols = append(cols, m.viewChat(chatW, ph))
+		if threadW > 0 {
+			cols = append(cols, m.viewThread(threadW, ph))
+		}
+		body = joinCols(cols) + "\n" + m.viewStatus()
 	}
-	sideW, chatW, threadW := m.layout()
-	ph := m.h - 1
-	var cols []string
-	if sideW > 0 {
-		cols = append(cols, m.viewSidebar(sideW, ph))
+	// Safety net: whatever happened above, no line may exceed the terminal width or height.
+	lines := strings.Split(zone.Scan(body), "\n")
+	if len(lines) > m.h {
+		lines = lines[:m.h]
 	}
-	cols = append(cols, m.viewChat(chatW, ph))
-	if threadW > 0 {
-		cols = append(cols, m.viewThread(threadW, ph))
+	for i, l := range lines {
+		lines[i] = cut(l, m.w)
 	}
-	return zone.Scan(lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, cols...), m.viewStatus()))
+	return strings.Join(lines, "\n")
 }

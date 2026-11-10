@@ -167,7 +167,7 @@ func apiError(err error) string {
 		case "user_not_found":
 			return "No such user."
 		}
-		return "Server error: " + ae.Code
+		return "Server error: " + chat.SanitizeLine(ae.Code)
 	}
 	return "Can't reach the server: " + err.Error()
 }

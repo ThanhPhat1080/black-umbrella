@@ -51,6 +51,10 @@ Admin commands: `umbrella admin invite`, `admin reset <user>` (the user re-regis
 key using the printed code; old messages become unreadable for them), `admin unlock <user>`.
 Five wrong PINs lock the account for 15 minutes, doubling on each further lock.
 
+Note: the WebSocket session token travels in the `?token=` query string (simple for Workers and
+the Go client). It is only sent over HTTPS in production, but avoid logging full request URLs
+on any proxy you put in front of the Worker.
+
 ## Key bindings
 
 | Key | Action |
@@ -60,6 +64,7 @@ Five wrong PINs lock the account for 15 minutes, doubling on each further lock.
 | Ctrl+N / Ctrl+P | next / previous conversation |
 | Up / Down | select message (when the list is focused) |
 | y | copy the selected message's first link |
+| Ctrl+T | with a thread open: switch the input between replying in the thread and the main chat |
 | a | toggle keep (anchor) on your own message |
 | r | open the selected message's thread |
 | Esc | close thread / picker / return to input |

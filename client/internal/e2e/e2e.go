@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -42,10 +43,13 @@ func randomBytes(n int) ([]byte, error) {
 
 // Seal encrypts text for every recipient (the sender should be included in recipients).
 func Seal(text string, sender KeyPair, recipients map[string][32]byte) (Sealed, error) {
-	body, err := json.Marshal(payload{Text: text})
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // "<" must not grow to \u003c: the server limit counts characters
+	if err := enc.Encode(payload{Text: text}); err != nil {
 		return Sealed{}, err
 	}
+	body := bytes.TrimRight(buf.Bytes(), "\n")
 	kb, err := randomBytes(32)
 	if err != nil {
 		return Sealed{}, err

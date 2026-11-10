@@ -4,7 +4,11 @@ import { userView } from "./auth";
 import { normalizeDisplayName, parseConv } from "./validate";
 
 export const EXPIRY_MS = 86_400_000;
-const MAX_CT = 24_000;
+const MAX_CT = 32_768;
+const MAX_KEPT_PER_USER = 200;
+const NONCE_LEN = 32; // 24 bytes in base64
+const WRAPPED_LEN = 96; // 72 bytes (24 nonce + 32 key + 16 tag) in base64
+const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export interface Outbox {
   send(username: string, msg: object): void;
@@ -20,6 +24,7 @@ interface MsgRow {
   kept: number;
   nonce: string;
   ct: string;
+  sender_key: string | null;
 }
 
 function messageView(m: MsgRow, key: string) {
@@ -32,6 +37,7 @@ function messageView(m: MsgRow, key: string) {
     kept: m.kept === 1,
     nonce: m.nonce,
     ct: m.ct,
+    senderKey: m.sender_key ?? "",
     key,
   };
 }
@@ -121,7 +127,8 @@ export class Core {
         .map((r) => r.username);
     }
     if (username !== c.a && username !== c.b) return null;
-    if (!this.userRow(c.a) || !this.userRow(c.b)) return null;
+    const have = this.sql.exec("SELECT username FROM users WHERE username IN (?, ?) AND public_key IS NOT NULL", c.a, c.b);
+    if (have.length !== 2) return null;
     return [c.a, c.b];
   }
 
@@ -132,6 +139,7 @@ export class Core {
     if (!want) return this.err(username, ref, "bad_conv");
     if (typeof m.ct !== "string" || typeof m.nonce !== "string" || !m.ct || !m.nonce) return this.err(username, ref, "bad_request");
     if (m.ct.length > MAX_CT) return this.err(username, ref, "too_large");
+    if (m.nonce.length !== NONCE_LEN || !B64.test(m.nonce)) return this.err(username, ref, "bad_request");
     let parentId: string | null = null;
     if (m.parentId !== undefined && m.parentId !== null) {
       const p = typeof m.parentId === "string"
@@ -148,15 +156,19 @@ export class Core {
     ) {
       return this.err(username, ref, "recipients_mismatch");
     }
+    if (!want.every((u) => (keys[u] as string).length === WRAPPED_LEN && B64.test(keys[u] as string))) {
+      return this.err(username, ref, "bad_request");
+    }
     const createdAt = this.now();
+    const senderKey = this.userRow(username)?.public_key ?? null;
     const rnd = [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, "0")).join("");
     const id = createdAt.toString(36).padStart(9, "0") + rnd;
     this.sql.exec(
-      "INSERT INTO messages(id, conv, sender, parent_id, created_at, kept, nonce, ct) VALUES (?,?,?,?,?,0,?,?)",
-      id, conv, username, parentId, createdAt, m.nonce, m.ct,
+      "INSERT INTO messages(id, conv, sender, parent_id, created_at, kept, nonce, ct, sender_key) VALUES (?,?,?,?,?,0,?,?,?)",
+      id, conv, username, parentId, createdAt, m.nonce, m.ct, senderKey,
     );
     for (const u of want) this.sql.exec("INSERT INTO message_keys(message_id, username, wrapped) VALUES (?,?,?)", id, u, keys[u]);
-    const row: MsgRow = { id, conv, sender: username, parent_id: parentId, created_at: createdAt, kept: 0, nonce: m.nonce, ct: m.ct };
+    const row: MsgRow = { id, conv, sender: username, parent_id: parentId, created_at: createdAt, kept: 0, nonce: m.nonce, ct: m.ct, sender_key: senderKey };
     for (const u of want) {
       const frame: Record<string, unknown> = { t: "msg", message: messageView(row, keys[u] as string) };
       if (u === username && typeof ref === "string") frame.ref = ref;
@@ -185,6 +197,10 @@ export class Core {
       this.deleteMessages([row.id]);
       for (const u of recipients) this.out.send(u, { t: "expired", ids: [row.id] });
       return;
+    }
+    if (m.kept && row.kept !== 1) {
+      const n = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM messages WHERE sender = ? AND kept = 1", username)[0].n;
+      if (n >= MAX_KEPT_PER_USER) return this.err(username, undefined, "keep_limit");
     }
     this.sql.exec("UPDATE messages SET kept = ? WHERE id = ?", m.kept ? 1 : 0, row.id);
     for (const u of recipients) this.out.send(u, { t: "kept", id: row.id, kept: m.kept });
