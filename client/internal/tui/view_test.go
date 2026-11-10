@@ -373,34 +373,6 @@ func TestListFocusTypingGoesToInput(t *testing.T) {
 	}
 }
 
-func TestThreadReplyTargetIsExplicit(t *testing.T) {
-	m, me, bob := newTestModel(t)
-	f := &fakeLink{}
-	m.conn = f
-	pm := sealedMsg(t, bob, me, "bob", "root1", "hell", "", "root")
-	m.onEvent(proto.Event{T: "msg", Message: &pm})
-	m.openThread(m.st.Timeline("hell")[0])
-	if v := m.View(); !strings.Contains(v, "Replying in thread") {
-		t.Fatalf("no indicator:\n%s", v)
-	}
-	typeAndEnter(m, "in thread")
-	m.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
-	if v := m.View(); strings.Contains(v, "Replying in thread") || !strings.Contains(v, "main chat") {
-		t.Fatalf("indicator did not switch:\n%s", v)
-	}
-	typeAndEnter(m, "in main")
-	s := f.sends()
-	if len(s) != 2 || s[0].ParentID != "root1" || s[1].ParentID != "" {
-		t.Fatalf("%+v", s)
-	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // closes the thread, focus on the list
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to the input
-	typeAndEnter(m, "after close")
-	if s = f.sends(); s[2].ParentID != "" || m.threadRoot != "" {
-		t.Fatal("thread should be closed and target main")
-	}
-}
-
 func TestSendErrorRestoresText(t *testing.T) {
 	m, _, _ := newTestModel(t)
 	f := &fakeLink{}
@@ -616,8 +588,7 @@ func TestClickInsideInputBoxFocusesIt(t *testing.T) {
 	if z.EndY-z.StartY != 4 { // top border + 3 text lines + bottom border
 		t.Fatalf("input box spans %d rows, want 5: %+v", z.EndY-z.StartY+1, z)
 	}
-	for _, toMain := range []bool{false, true} {
-		m.toMain = toMain
+	for range []bool{false, true} {
 		m.pane = paneMain
 		m.input.Blur()
 		// the border itself and the text area both count
@@ -627,9 +598,6 @@ func TestClickInsideInputBoxFocusesIt(t *testing.T) {
 			m.Update(click(pt[0], pt[1]))
 			if m.pane != paneInput || !m.input.Focused() {
 				t.Fatalf("click %v: pane=%v focused=%v", pt, m.pane, m.input.Focused())
-			}
-			if m.toMain != toMain {
-				t.Fatalf("click changed the reply target (toMain=%v)", m.toMain)
 			}
 		}
 	}
@@ -907,8 +875,8 @@ func TestRightOpensThreadLeftClosesKeepingSelection(t *testing.T) {
 	press(m, tea.KeyUp)
 	press(m, tea.KeyUp)
 	press(m, tea.KeyRight)
-	if m.threadRoot != ids[3] || m.pane != paneThread || m.toMain {
-		t.Fatalf("root=%q pane=%v toMain=%v", m.threadRoot, m.pane, m.toMain)
+	if m.threadRoot != ids[3] || m.pane != paneThreadInput {
+		t.Fatalf("root=%q pane=%v", m.threadRoot, m.pane)
 	}
 	press(m, tea.KeyLeft)
 	if m.threadRoot != "" || m.pane != paneMain {
@@ -1069,5 +1037,196 @@ func TestSelectedMessageHasFullWidthBackground(t *testing.T) {
 				t.Fatalf("selected line width %d, want 50: %q", width(l), l)
 			}
 		}
+	}
+}
+
+func twoBoxModel(t *testing.T) (*Model, *fakeLink, string) {
+	t.Helper()
+	m, me, bob := newTestModel(t)
+	f := &fakeLink{}
+	m.conn = f
+	ids := fillTimeline(t, m, me, bob, 3)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	press(m, tea.KeyUp)
+	press(m, tea.KeyRight) // opens the thread of the newest message, focus on the thread box
+	return m, f, ids[2]
+}
+
+func typeInto(m *Model, text string) {
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+}
+
+func TestThreadBoxAndMainBoxRouteSeparately(t *testing.T) {
+	m, f, root := twoBoxModel(t)
+	if m.pane != paneThreadInput || m.threadRoot != root {
+		t.Fatalf("pane=%v root=%q", m.pane, m.threadRoot)
+	}
+	typeInto(m, "reply text")
+	press(m, tea.KeyEnter)
+	press(m, tea.KeyTab)
+	if m.pane != paneInput {
+		t.Fatalf("Tab should go to the main box, pane=%v", m.pane)
+	}
+	typeInto(m, "main text")
+	press(m, tea.KeyEnter)
+	s := f.sends()
+	if len(s) != 2 || s[0].ParentID != root || s[1].ParentID != "" {
+		t.Fatalf("sends: %+v", s)
+	}
+	if m.input.Value() != "" || m.tinput.Value() != "" {
+		t.Fatal("sent boxes should be cleared")
+	}
+	// drafts are independent and survive Tab
+	typeInto(m, "main draft")
+	press(m, tea.KeyTab)
+	typeInto(m, "thread draft")
+	press(m, tea.KeyTab)
+	press(m, tea.KeyTab)
+	if m.input.Value() != "main draft" || m.tinput.Value() != "thread draft" || m.pane != paneThreadInput {
+		t.Fatalf("drafts: %q %q pane=%v", m.input.Value(), m.tinput.Value(), m.pane)
+	}
+	// the old target toggle is gone
+	if v := m.View(); strings.Contains(v, "Replying in thread") || strings.Contains(v, "Posting to main") {
+		t.Fatal("target line should be gone")
+	}
+	if !strings.Contains(m.View(), "Reply in thread") && !strings.Contains(m.View(), "thread draft") {
+		t.Fatal("thread box missing")
+	}
+}
+
+func TestTabWithoutThreadKeepsOldBehaviour(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	press(m, tea.KeyTab)
+	if m.pane != paneMain {
+		t.Fatalf("pane=%v", m.pane)
+	}
+	press(m, tea.KeyTab)
+	if m.pane != paneInput {
+		t.Fatalf("pane=%v", m.pane)
+	}
+}
+
+func TestLeftClosesThreadOnlyFromEmptyThreadBox(t *testing.T) {
+	m, _, root := twoBoxModel(t)
+	typeInto(m, "abc")
+	before := m.tinput.LineInfo().CharOffset
+	press(m, tea.KeyLeft)
+	if m.threadRoot == "" || m.tinput.LineInfo().CharOffset != before-1 {
+		t.Fatalf("Left with text must move the cursor: root=%q offset %d->%d", m.threadRoot, before, m.tinput.LineInfo().CharOffset)
+	}
+	m.tinput.Reset()
+	press(m, tea.KeyLeft)
+	if m.threadRoot != "" || m.pane != paneMain {
+		t.Fatalf("Left on empty box: root=%q pane=%v", m.threadRoot, m.pane)
+	}
+	if sel, _ := m.selectedMsg(); sel.ID != root {
+		t.Fatalf("selection lost: %s", sel.ID)
+	}
+	// Esc closes from the thread box even with a draft
+	press(m, tea.KeyRight)
+	typeInto(m, "draft")
+	press(m, tea.KeyEsc)
+	if m.threadRoot != "" || m.pane != paneMain {
+		t.Fatalf("Esc: root=%q pane=%v", m.threadRoot, m.pane)
+	}
+}
+
+func TestUpFromThreadBoxGoesToRepliesList(t *testing.T) {
+	m, _, root := twoBoxModel(t)
+	pm := sealedMsg(t, e2e.KeyPair{}, e2e.KeyPair{}, "bob", "x", "hell", root, "x")
+	_ = pm
+	press(m, tea.KeyUp)
+	if m.pane != paneThread {
+		t.Fatalf("pane=%v", m.pane)
+	}
+}
+
+func TestClickFocusesEitherBox(t *testing.T) {
+	m, _, _ := twoBoxModel(t)
+	mz := waitZone(t, m, "input")
+	tz := waitZone(t, m, "tinput")
+	m.Update(click(mz.StartX+3, mz.StartY+1))
+	if m.pane != paneInput || !m.input.Focused() || m.tinput.Focused() {
+		t.Fatalf("main click: pane=%v", m.pane)
+	}
+	m.Update(click(tz.StartX+3, tz.StartY+1))
+	if m.pane != paneThreadInput || !m.tinput.Focused() || m.input.Focused() {
+		t.Fatalf("thread click: pane=%v", m.pane)
+	}
+}
+
+func TestClickThreadButtonFocusesThreadBox(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	fillTimeline(t, m, me, bob, 2)
+	z := waitZone(t, m, "thr:m002")
+	m.Update(click(z.StartX+1, z.StartY))
+	if m.threadRoot != "m002" || m.pane != paneThreadInput {
+		t.Fatalf("root=%q pane=%v", m.threadRoot, m.pane)
+	}
+}
+
+func TestROpensThreadWithoutMovingFocus(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	fillTimeline(t, m, me, bob, 2)
+	m.pane = paneMain
+	m.input.Blur()
+	m.selMain = 1
+	typeInto(m, "r")
+	if m.threadRoot != "m002" || m.pane != paneMain {
+		t.Fatalf("root=%q pane=%v", m.threadRoot, m.pane)
+	}
+}
+
+func TestErrorRestoresIntoTheSendingBox(t *testing.T) {
+	m, f, _ := twoBoxModel(t)
+	typeInto(m, "thread msg")
+	press(m, tea.KeyEnter)
+	ref := f.sends()[0].Ref
+	press(m, tea.KeyTab)
+	typeInto(m, "main draft")
+	m.onEvent(proto.Event{T: "error", Ref: ref, Error: "bad_parent"})
+	if m.tinput.Value() != "thread msg" || m.input.Value() != "main draft" {
+		t.Fatalf("thread=%q main=%q", m.tinput.Value(), m.input.Value())
+	}
+	// and the other way round
+	press(m, tea.KeyEnter)
+	ref = f.sends()[1].Ref
+	m.onEvent(proto.Event{T: "error", Ref: ref, Error: "too_large"})
+	if m.input.Value() != "main draft" || m.tinput.Value() != "thread msg" {
+		t.Fatalf("thread=%q main=%q", m.tinput.Value(), m.input.Value())
+	}
+}
+
+func TestKaomojiPickerInsertsIntoThreadBox(t *testing.T) {
+	m, _, _ := twoBoxModel(t)
+	typeInto(m, "/i")
+	press(m, tea.KeyEnter)
+	if m.overlay != overlayPicker {
+		t.Fatal("picker not open")
+	}
+	press(m, tea.KeyEnter)
+	if m.tinput.Value() == "" || m.input.Value() != "" || m.pane != paneThreadInput {
+		t.Fatalf("thread=%q main=%q pane=%v", m.tinput.Value(), m.input.Value(), m.pane)
+	}
+}
+
+func TestThreadBoxRendersAndFitsAtAllSizes(t *testing.T) {
+	m, _, _ := twoBoxModel(t)
+	for _, size := range [][2]int{{120, 35}, {80, 24}, {40, 12}} {
+		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		lines := strings.Split(m.View(), "\n")
+		if len(lines) != size[1] {
+			t.Fatalf("%v: %d lines", size, len(lines))
+		}
+		for _, l := range lines {
+			if rw := runewidth.StringWidth(ansi.Strip(l)); rw != size[0] {
+				t.Fatalf("%v: width %d: %q", size, rw, l)
+			}
+		}
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	v := ansi.Strip(m.View())
+	if strings.Count(v, "╭") < 5 || !strings.Contains(v, "0/4000") {
+		t.Fatalf("expected two boxes with counters:\n%s", v)
 	}
 }

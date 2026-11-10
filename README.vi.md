@@ -158,7 +158,7 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 |---|---|
 | `Enter` | gửi tin |
 | `Alt+Enter` | xuống dòng trong tin nhắn |
-| `Tab` | chuyển vùng: ô nhập → danh sách tin → thread |
+| `Tab` | chuyển giữa ô chat chính và ô trả lời thread (khi thread đang mở); không có thread thì chuyển ô nhập ⇄ danh sách tin |
 | `Ctrl+N` / `Ctrl+P` | sang cuộc trò chuyện kế tiếp / trước đó |
 | `↑` (khi ô nhập trống) | chọn tin nhắn mới nhất, rồi `↑` / `↓` để di chuyển |
 | `y` | copy link trong tin đang chọn |
@@ -166,7 +166,6 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `r` | mở thread của tin đang chọn |
 | `→` | mở thread của tin đang chọn và chuyển focus sang panel thread |
 | `←` hoặc `Esc` | đóng thread, quay về danh sách tin với tin đó vẫn đang được chọn |
-| `Ctrl+T` | khi đang mở thread: chuyển ô nhập giữa "trả lời trong thread" và "gửi vào chat chính" |
 | `Esc` | (khi không mở thread) đóng bảng kaomoji / profile, quay về ô nhập |
 | `Ctrl+C` | thoát |
 
@@ -197,7 +196,7 @@ Click được vào: tên cuộc trò chuyện ở sidebar, avatar (mở profile
 Gõ `@username` trong Hell room — người đó thấy tên được tô sáng, terminal kêu "bíp" và sidebar hiện số tin chưa đọc. Người đang offline sẽ thấy khi mở app lần sau.
 
 ### Thread
-Chọn một tin (`↑`) rồi bấm `r`, hoặc click `[💬]`. Panel thread mở bên phải; dòng phía trên ô nhập cho biết bạn đang **"Replying in thread"** hay **"Posting to main chat"** (`Ctrl+T` để đổi). Tin gốc hiện số trả lời `💬 N`.
+Chọn một tin (`↑`) rồi bấm `r`, hoặc click `[💬]`. Panel thread mở bên phải và có **ô trả lời riêng** ở dưới cùng (viền sáng khi đang focus); ô chat chính luôn gửi vào cuộc trò chuyện chính. `Tab` chuyển qua lại giữa hai ô, nháp ở mỗi ô được giữ nguyên; `→` hoặc click `[💬]` mở thread và focus thẳng vào ô trả lời; `←` (khi ô trả lời trống) hoặc `Esc` đóng thread. Tin gốc hiện số trả lời `💬 N`.
 
 ### Tin nhắn tự xóa sau 24 giờ và ⚓ keep
 - Mọi tin bị **xóa khỏi server 24 giờ** sau khi gửi.

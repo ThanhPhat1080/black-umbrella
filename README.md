@@ -62,13 +62,12 @@ on any proxy you put in front of the Worker.
 | Key | Action |
 |---|---|
 | Enter / Alt+Enter | send / newline |
-| Tab | cycle focus: input, messages, thread |
+| Tab | with a thread open: switch between the main textbox and the thread reply textbox; otherwise input ⇄ message list |
 | Ctrl+N / Ctrl+P | next / previous conversation |
 | Up / Down | select message (when the list is focused) |
 | y | copy the selected message's first link |
-| Ctrl+T | with a thread open: switch the input between replying in the thread and the main chat |
 | a | toggle keep (anchor) on your own message |
-| r or Right | open the selected message's thread (Right also moves focus to the thread panel) |
+| r or Right | open the selected message's thread (Right also focuses the thread reply textbox) |
 | Left or Esc | with a thread open: close it and return to the message list with the same message selected |
 | Esc | message list without a thread / picker: return to the input |
 | Ctrl+C or /quit | quit |

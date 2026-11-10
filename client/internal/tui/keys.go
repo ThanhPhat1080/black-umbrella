@@ -6,7 +6,6 @@ const (
 	keyNextConv  = "ctrl+n"
 	keyPrevConv  = "ctrl+p"
 	keyFocus     = "tab"
-	keyTarget    = "ctrl+t"
 	keyEsc       = "esc"
 	keyEnter     = "enter"
 	keyUp        = "up"
@@ -19,4 +18,4 @@ const (
 	maxInputRune = 4000
 )
 
-const helpLine = "Enter send · Alt+Enter newline · Tab focus · Ctrl+N/P switch · ↑/↓ select · → open thread · ←/Esc close thread · y copy link · a keep · /i kaomoji · Ctrl+T thread/main · Esc close"
+const helpLine = "Enter send · Alt+Enter newline · Tab main/thread box · Ctrl+N/P switch · ↑/↓ select · → open thread · ←/Esc close thread · y copy link · a keep · /i kaomoji · Esc close"

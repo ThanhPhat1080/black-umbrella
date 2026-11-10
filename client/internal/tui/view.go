@@ -549,15 +549,6 @@ func (m *Model) viewChat(w, h int) string {
 		title += "  " + strings.Join(names, dim.Render(", ")) + dim.Italic(true).Render(" is typing…")
 	}
 	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
-	var target string
-	if m.threadRoot != "" {
-		inH++
-		if m.toMain {
-			target = accent.Render("Posting to main chat") + dim.Render(" · Ctrl+T: reply in thread")
-		} else {
-			target = accent.Render("Replying in thread") + dim.Render(" · Esc to close · Ctrl+T: main chat")
-		}
-	}
 	bodyH := h - 2 - 1 - inH
 	if bodyH < 1 {
 		bodyH = 1
@@ -579,9 +570,6 @@ func (m *Model) viewChat(w, h int) string {
 	}
 	plus := zone.Mark("plus", accent.Render("[+]"))
 	foot := plus + dim.Render(" kaomoji  ") + counter
-	if target != "" {
-		lines = append(lines, target)
-	}
 	var boxed []string
 	for _, l := range strings.Split(m.input.View(), "\n") {
 		boxed = append(boxed, " "+l)
@@ -590,7 +578,7 @@ func (m *Model) viewChat(w, h int) string {
 	box := paneBox(fit(boxed, inner-2, m.input.Height()), inner-2, m.pane == paneInput)
 	lines = append(lines, strings.Split(zone.Mark("input", box), "\n")...)
 	lines = append(lines, foot)
-	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread)
+	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput)
 }
 
 func (m *Model) viewThread(w, h int) string {
@@ -617,8 +605,22 @@ func (m *Model) viewThread(w, h int) string {
 		}
 	}
 	lines := []string{nameSt.Render("Thread") + dim.Render("  (Esc to close)")}
-	lines = append(lines, window(blocks, bsel, h-3, &m.topThr, &m.pinThr)...)
-	return paneBox(fit(lines, inner, h-2), inner, m.pane == paneThread)
+	boxH := m.tinput.Height() + 2 + 1 // text lines + borders + counter line
+	bodyH := maxInt(1, h-2-1-boxH)
+	lines = append(lines, window(blocks, bsel, bodyH, &m.topThr, &m.pinThr)...)
+	var boxed []string
+	for _, l := range strings.Split(m.tinput.View(), "\n") {
+		boxed = append(boxed, " "+l)
+	}
+	box := paneBox(fit(boxed, inner-2, m.tinput.Height()), inner-2, m.pane == paneThreadInput)
+	lines = append(lines, strings.Split(zone.Mark("tinput", box), "\n")...)
+	n := utf8.RuneCountInString(m.tinput.Value())
+	counter := dim.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
+	if n > maxInputRune-200 {
+		counter = errSt.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
+	}
+	lines = append(lines, counter)
+	return paneBox(fit(lines, inner, h-2), inner, m.pane == paneThread || m.pane == paneThreadInput)
 }
 
 func (m *Model) viewStatus() string {

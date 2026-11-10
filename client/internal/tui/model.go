@@ -31,6 +31,7 @@ const (
 	paneInput pane = iota
 	paneMain
 	paneThread
+	paneThreadInput // the textbox at the bottom of the thread panel
 )
 
 type overlay int
@@ -67,6 +68,7 @@ type link interface {
 }
 
 type pendingSend struct {
+	fromThread         bool // which textbox it came from (failed text is restored there)
 	conv, parent, text string
 	names              []string
 	retried            bool
@@ -79,8 +81,9 @@ type Model struct {
 	kp        e2e.KeyPair
 	reconnect func(context.Context) (*api.Conn, error)
 
-	w, h  int
-	input textarea.Model
+	w, h   int
+	input  textarea.Model // main textbox: always posts to the main conversation
+	tinput textarea.Model // thread textbox: replies to the open thread root
 
 	pane               pane
 	selMain, selThread int
@@ -93,7 +96,7 @@ type Model struct {
 	pickIdx     int
 	profileUser string
 
-	toMain       bool   // thread panel open, but the input posts to the main conversation
+	pickThread   bool   // the kaomoji picker was opened from the thread box
 	fatal        string // non-empty: connection is permanently gone (revoked / locked)
 	status       string
 	statusUntil  time.Time
@@ -124,7 +127,15 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
 	ta.Placeholder = "Message… (/i for kaomoji)"
 	ta.Focus()
-	return &Model{ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
+	tb := textarea.New()
+	tb.Prompt = ""
+	tb.ShowLineNumbers = false
+	tb.CharLimit = maxInputRune
+	tb.SetHeight(3)
+	tb.KeyMap.InsertNewline = ta.KeyMap.InsertNewline
+	tb.Placeholder = "Reply in thread…"
+	tb.Blur()
+	return &Model{tinput: tb, ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
 		selMain: -1, selThread: -1, pinMain: true, pinThr: true, pending: map[string]*pendingSend{}, w: 0, h: 0}
 }
 
@@ -211,8 +222,9 @@ func minInt(a, b int) int {
 }
 
 func (m *Model) resize() {
-	_, cw, _ := m.layout()
+	_, cw, tw := m.layout()
 	m.input.SetWidth(maxInt(10, cw-6)) // pane border + box border + 1 space padding each side
+	m.tinput.SetWidth(maxInt(10, tw-6))
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -253,8 +265,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onMouse(msg)
 	}
 	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
+	if m.pane == paneThreadInput {
+		m.tinput, cmd = m.tinput.Update(msg)
+	} else {
+		m.input, cmd = m.input.Update(msg)
+	}
 	return m, cmd
+}
+
+// box is the textbox that currently has (or last had) the keyboard.
+func (m *Model) box() *textarea.Model {
+	if m.pane == paneThreadInput {
+		return &m.tinput
+	}
+	return &m.input
 }
 
 func errorText(code string) string {
@@ -310,7 +334,7 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 		}
 		m.setStatus(errorText(ev.Error))
 		if p != nil {
-			m.restore(p.text) // never lose what the user wrote
+			m.restore(p.text, p.fromThread) // never lose what the user wrote
 		}
 	}
 	m.clampSel()
@@ -318,11 +342,15 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 }
 
 // restore puts a message that failed to send back into the input (ahead of any new draft).
-func (m *Model) restore(text string) {
-	if cur := m.input.Value(); cur != "" {
+func (m *Model) restore(text string, thread bool) {
+	b := &m.input
+	if thread {
+		b = &m.tinput
+	}
+	if cur := b.Value(); cur != "" {
 		text += "\n" + cur
 	}
-	m.input.SetValue(text)
+	b.SetValue(text)
 }
 
 func (m *Model) recipientNames(conv string) []string {
@@ -387,7 +415,7 @@ func (m *Model) convs() []string {
 
 func (m *Model) switchConv(conv string) {
 	m.st.SetActive(conv)
-	m.threadRoot, m.toMain = "", false
+	m.threadRoot = ""
 	m.selMain, m.selThread = -1, -1
 	m.focusInput()
 	m.resize()
@@ -447,9 +475,20 @@ func (m *Model) openThread(msg chat.Msg) {
 	if msg.ParentID != "" {
 		id = msg.ParentID
 	}
-	m.threadRoot, m.toMain = id, false
+	if id != m.threadRoot {
+		m.tinput.Reset() // a draft belongs to its thread
+	}
+	m.threadRoot = id
 	m.selThread = -1
 	m.resize()
+}
+
+// focusThreadInput focuses the thread panel's textbox.
+func (m *Model) focusThreadInput() {
+	m.pane = paneThreadInput
+	m.tinput.Focus()
+	m.input.Blur()
+	m.pinThr = true
 }
 
 func (m *Model) toggleKeep(msg chat.Msg) {
@@ -497,11 +536,6 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keyFocus:
 		m.cycleFocus()
 		return m, nil
-	case keyTarget:
-		if m.threadRoot != "" {
-			m.toMain = !m.toMain
-		}
-		return m, nil
 	case keyEsc:
 		if m.threadRoot != "" {
 			m.closeThread() // back to the main list, same message selected
@@ -510,24 +544,39 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focusInput()
 		return m, nil
 	}
-	if m.pane != paneInput {
+	if m.pane != paneInput && m.pane != paneThreadInput {
 		return m.listKey(k)
 	}
+	thread := m.pane == paneThreadInput
+	b := m.box()
 	if s == keyEnter {
 		return m, m.submit()
 	}
-	if s == keyUp && (m.input.Value() == "" || m.input.Line() == 0) {
-		// Up from the input moves to the message list, selecting the newest message.
-		if n := len(m.st.Timeline(m.st.Active())); n > 0 {
+	atStart := b.Value() == "" || (b.Line() == 0 && b.LineInfo().CharOffset == 0 && b.LineInfo().RowOffset == 0)
+	switch {
+	case s == keyUp && (b.Value() == "" || b.Line() == 0):
+		if thread {
+			// Up from the thread box moves to the replies list, selecting the newest reply.
+			if _, it := m.threadItems(); len(it) > 0 {
+				m.pane = paneThread
+				m.tinput.Blur()
+				m.selThread = len(it) - 1
+				return m, nil
+			}
+		} else if n := len(m.st.Timeline(m.st.Active())); n > 0 {
+			// Up from the input moves to the message list, selecting the newest message.
 			m.pane = paneMain
 			m.input.Blur()
 			m.selMain = n - 1
 			return m, nil
 		}
+	case s == keyLeft && thread && atStart:
+		m.closeThread()
+		return m, nil
 	}
 	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(k)
-	if v := m.input.Value(); v != "" && !strings.HasPrefix(v, "/") && time.Since(m.lastTyping) >= typingEvery {
+	*b, cmd = b.Update(k)
+	if v := b.Value(); v != "" && !strings.HasPrefix(v, "/") && time.Since(m.lastTyping) >= typingEvery {
 		m.lastTyping = time.Now()
 		_ = m.conn.Send(proto.NewTyping(m.st.Active()))
 	}
@@ -538,13 +587,14 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) focusInput() {
 	m.pane = paneInput
 	m.input.Focus()
+	m.tinput.Blur()
 	m.pinMain, m.pinThr = true, true
 }
 
 // closeThread closes the thread panel and focuses the main list on the thread's root.
 func (m *Model) closeThread() {
 	root := m.threadRoot
-	m.threadRoot, m.toMain = "", false
+	m.threadRoot = ""
 	m.pinThr = true
 	m.resize()
 	tl := m.st.Timeline(m.st.Active())
@@ -559,6 +609,7 @@ func (m *Model) closeThread() {
 	}
 	m.pane = paneMain
 	m.input.Blur()
+	m.tinput.Blur()
 }
 
 // selIDs / reselect keep the selection on the same messages when the timeline changes underneath.
@@ -591,6 +642,14 @@ func (m *Model) reselect(mainID, thrID string) {
 }
 
 func (m *Model) cycleFocus() {
+	if m.threadRoot != "" { // two textboxes: Tab flips between them
+		if m.pane == paneInput {
+			m.focusThreadInput()
+		} else {
+			m.focusInput()
+		}
+		return
+	}
 	next := map[pane]pane{paneInput: paneMain, paneMain: paneInput, paneThread: paneInput}
 	if m.threadRoot != "" {
 		next = map[pane]pane{paneInput: paneMain, paneMain: paneThread, paneThread: paneInput}
@@ -638,11 +697,7 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keyRight:
 		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
 			m.openThread(msg)
-			m.pane = paneThread
-			m.input.Blur()
-			m.pinThr = true
-			_, it := m.threadItems()
-			m.selThread = len(it) - 1
+			m.focusThreadInput()
 		}
 	case keyLeft:
 		if m.threadRoot != "" {
@@ -655,9 +710,14 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		// Anything else that types a character belongs to the input: refocus it and forward.
 		if k.Type == tea.KeyRunes || k.Type == tea.KeySpace {
-			m.focusInput()
 			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(k)
+			if m.pane == paneThread {
+				m.focusThreadInput()
+				m.tinput, cmd = m.tinput.Update(k)
+			} else {
+				m.focusInput()
+				m.input, cmd = m.input.Update(k)
+			}
 			return m, cmd
 		}
 	}
@@ -665,7 +725,9 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) submit() tea.Cmd {
-	text := strings.TrimSpace(m.input.Value())
+	thread := m.pane == paneThreadInput
+	b := m.box()
+	text := strings.TrimSpace(b.Value())
 	if text == "" {
 		return nil
 	}
@@ -677,13 +739,13 @@ func (m *Model) submit() tea.Cmd {
 		return nil
 	}
 	parent := ""
-	if m.threadRoot != "" && !m.toMain {
-		parent = m.threadRoot
+	if thread {
+		parent = m.threadRoot // the main box never posts into a thread
 	}
-	p := &pendingSend{conv: m.st.Active(), parent: parent, text: text}
+	p := &pendingSend{fromThread: thread, conv: m.st.Active(), parent: parent, text: text}
 	if m.send(p) {
 		m.pinMain, m.pinThr = true, true
-		m.input.Reset()
+		b.Reset()
 		m.lastTyping = time.Time{}
 	}
 	return nil
@@ -696,15 +758,15 @@ func (m *Model) command(text string) tea.Cmd {
 	case "/quit", "/q":
 		return tea.Quit
 	case "/i":
-		m.input.Reset()
-		m.overlay, m.pickIdx = overlayPicker, 0
+		m.box().Reset()
+		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, m.pane == paneThreadInput
 	case "/whois":
 		u := strings.TrimPrefix(arg, "@")
 		if _, ok := m.st.Users()[u]; !ok {
 			m.setStatus("No such user: " + arg)
 			return nil
 		}
-		m.input.Reset()
+		m.box().Reset()
 		m.showProfile(u)
 	case "/name":
 		if n := utf8.RuneCountInString(arg); n < 1 || n > 32 {
@@ -715,7 +777,7 @@ func (m *Model) command(text string) tea.Cmd {
 			m.setStatus("Not connected. Reconnecting…")
 			return nil
 		}
-		m.input.Reset()
+		m.box().Reset()
 		m.setStatus("Name updated.")
 	default:
 		m.setStatus("Unknown command: " + fields[0])
@@ -746,7 +808,11 @@ func (m *Model) pickerKey(s string) (tea.Model, tea.Cmd) {
 		}
 	case keyEnter:
 		k := kaomoji.All[m.pickIdx]
-		m.input.InsertString(k)
+		if m.pickThread {
+			m.tinput.InsertString(k)
+		} else {
+			m.input.InsertString(k)
+		}
 		_ = clip.Copy(k)
 		m.overlay = overlayNone
 		m.setStatus("Inserted and copied " + k)
@@ -790,13 +856,15 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if zone.Get("input").InBounds(msg) {
-		// Clicking the textbox focuses it; the thread/main reply target is left alone.
-		m.pane = paneInput
-		m.input.Focus()
+		m.focusInput()
+		return m, nil
+	}
+	if m.threadRoot != "" && zone.Get("tinput").InBounds(msg) {
+		m.focusThreadInput()
 		return m, nil
 	}
 	if zone.Get("plus").InBounds(msg) {
-		m.overlay, m.pickIdx = overlayPicker, 0
+		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, false
 		return m, nil
 	}
 	for _, e := range m.st.Sidebar() {
@@ -826,16 +894,8 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case zone.Get("thr:" + v.ID).InBounds(msg):
 			m.openThread(v)
+			m.focusThreadInput()
 			return m, nil
-		}
-	}
-	if m.threadRoot != "" && msg.Y < m.h-1 {
-		sideW, chatW, _ := m.layout()
-		switch {
-		case msg.X >= sideW && msg.X < sideW+chatW:
-			m.toMain = true // clicking the main chat makes it the post target
-		case msg.X >= sideW+chatW:
-			m.toMain = false
 		}
 	}
 	return m, nil
