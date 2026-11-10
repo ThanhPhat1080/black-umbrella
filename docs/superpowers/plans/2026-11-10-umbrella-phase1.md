@@ -118,10 +118,12 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: Tasks 1–3.
 - Produces: `export class HubDO extends DurableObject`, `export default { fetch }`.
 
-- [ ] **Step 1:** `HubDO`: `sql` adapter over `ctx.storage.sql.exec(q, ...p).toArray()`; `migrate` in constructor via `blockConcurrencyWhile`; `/api/ws` validates token, `ctx.acceptWebSocket(server, [username])`, sends `hello`; `webSocketMessage/Close/Error` route to `Core` using `ctx.getTags(ws)[0]`; `Outbox.send` iterates `ctx.getWebSockets(username)`; alarm runs `sweep()` and reschedules `+5 min` (set on first request if none). After successful register, call `core.userJoined`.
-- [ ] **Step 2:** Worker `fetch` forwards to `env.HUB.get(env.HUB.idFromName("hub"))`.
-- [ ] **Step 3:** Verify: `npx wrangler dev --port 8787` with `.dev.vars` `ADMIN_TOKEN=dev`; `curl -XPOST -H 'Authorization: Bearer dev' localhost:8787/api/admin/invite` → `{"code":…}`; `npx tsc --noEmit` clean.
-- [ ] **Step 4:** Commit `feat(server): durable object hub and worker`.
+- [x] **Step 1:** `HubDO`: `sql` adapter over `ctx.storage.sql.exec(q, ...p).toArray()`; `migrate` in constructor via `blockConcurrencyWhile`; `/api/ws` validates token, `ctx.acceptWebSocket(server, [username])`, sends `hello`; `webSocketMessage/Close/Error` route to `Core` using `ctx.getTags(ws)[0]`; `Outbox.send` iterates `ctx.getWebSockets(username)`; alarm runs `sweep()` and reschedules `+5 min` (set on first request if none). After successful register, call `core.userJoined`.
+- [x] **Step 2:** Worker `fetch` forwards to `env.HUB.get(env.HUB.idFromName("hub"))`.
+- [x] **Step 3:** Verify: `npx wrangler dev --port 8787` with `.dev.vars` `ADMIN_TOKEN=dev`; `curl -XPOST -H 'Authorization: Bearer dev' localhost:8787/api/admin/invite` → `{"code":…}`; `npx tsc --noEmit` clean.
+- [x] **Step 4:** Commit `feat(server): durable object hub and worker`.
+
+> **Deviation:** Used `--local --persist-to` in verification; upgrade helper named `upgrade` (DurableObject base class already defines `connect`).
 
 ## Client (`client/`)
 
