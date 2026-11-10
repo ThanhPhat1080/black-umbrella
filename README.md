@@ -44,6 +44,12 @@ sudo chmod +x /usr/local/bin/umbrella
 sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella   # binary is not notarised; ignore "No such xattr"
 ```
 
+Linux (use `arm64` on ARM machines; the same command installs it the first time):
+
+```sh
+sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella
+```
+
 Windows (PowerShell):
 
 ```powershell

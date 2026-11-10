@@ -16,6 +16,9 @@ const (
 	ExpiredText       = "[message expired]"
 	UndecryptableText = "[unable to decrypt]"
 	typingTTL         = 4 * time.Second
+	// BuzzText is the body of a buzz message. It travels as ordinary encrypted text, so the
+	// server needs no changes and older clients just show "/buzz".
+	BuzzText = "/buzz"
 )
 
 type Msg struct {
@@ -25,7 +28,7 @@ type Msg struct {
 	Replies                          int
 }
 
-type Effects struct{ Bell bool }
+type Effects struct{ Bell, Buzz bool }
 
 type Entry struct {
 	Conv, Label, Username string
@@ -146,6 +149,7 @@ func (s *State) Apply(ev proto.Event) Effects {
 			break
 		}
 		s.msgs[m.ID] = m
+		fx.Buzz = m.Text == BuzzText && !m.Undecryptable
 		if m.Sender == s.me {
 			break
 		}

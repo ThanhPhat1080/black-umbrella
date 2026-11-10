@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.9 — 2026-11-10
+- Client: `/buzz` shakes everyone's screen for 1s and shows an animated `⚡ ~~ <name> buzzzz! (ﾉ°Д°)ﾉ ~~ ⚡` banner for 2s (10s cooldown; older clients just see `/buzz`).
+- Client: `/iam` shows who you are (display name and username).
+- Docs: quick-update commands for macOS, Linux and Windows.
+
 ## v0.1.8 — 2026-11-10
 - Client: mouse-drag text selection and copy (stays within one pane); message editing.
 - Docs: install and update instructions for macOS and Windows.

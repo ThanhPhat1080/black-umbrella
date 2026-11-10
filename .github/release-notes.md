@@ -1,4 +1,4 @@
-First release of **Umbrella** ☂: an end-to-end encrypted terminal chat. Server: `https://umbrella.black-umbrella.workers.dev` (built into the binaries).
+**Umbrella** ☂: an end-to-end encrypted terminal chat. See [CHANGELOG.md](https://github.com/ThanhPhat1080/black-umbrella/blob/main/CHANGELOG.md) for what changed. Server: `https://umbrella.black-umbrella.workers.dev` (built into the binaries).
 
 **Hướng dẫn tiếng Việt:** [README.vi.md](https://github.com/ThanhPhat1080/black-umbrella/blob/feat/phase1/README.vi.md)
 
@@ -10,6 +10,11 @@ First release of **Umbrella** ☂: an end-to-end encrypted terminal chat. Server
 | Linux ARM64 | `umbrella-linux-arm64` |
 | Windows | `umbrella-windows-amd64.exe` |
 
+**Quick update** (your key stays in `~/.umbrella/`, no need to register again; quit Umbrella first):
+- **macOS:** `sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella && sudo chmod +x /usr/local/bin/umbrella && sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella` (use `amd64` on Intel)
+- **Linux:** `sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella`
+- **Windows (PowerShell):** `Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"`
+
 Get an invite code from your admin, then run `umbrella register`, then `umbrella`.
 
 The binaries are unsigned:
@@ -17,5 +22,3 @@ The binaries are unsigned:
 - **Windows:** choose SmartScreen → More info → Run anyway.
 
 Verify downloads with `SHA256SUMS.txt`.
-
-Built from [ThanhPhat1080/black-umbrella#1](https://github.com/ThanhPhat1080/black-umbrella/pull/1) (branch `feat/phase1`).

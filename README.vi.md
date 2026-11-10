@@ -106,6 +106,12 @@ sudo chmod +x /usr/local/bin/umbrella
 sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella
 ```
 
+**Linux** (máy ARM thì thay `amd64` bằng `arm64`):
+
+```bash
+sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella
+```
+
 **Windows (PowerShell):**
 
 ```powershell

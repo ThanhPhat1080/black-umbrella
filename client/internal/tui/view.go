@@ -239,6 +239,7 @@ type msgView struct {
 	Selected bool
 	InThread bool // replies in the thread panel get no 💬 button
 	Online   bool // sender's presence, shown as the dot in the header
+	Buzz     buzzAnim
 }
 
 func presenceDot(online bool) string {
@@ -300,11 +301,20 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	if own && v.Width > 40 {
 		textW = minInt(textW, maxInt(20, v.Width*7/10)) // own messages wrap narrower so they sit visibly right
 	}
-	body := wrapText(m.Text, textW)
-	lt := newLinkTracker(m.Text)
+	isBuzz := m.Text == chat.BuzzText && !m.Undecryptable
+	text := m.Text
+	if isBuzz {
+		text = fmt.Sprintf(buzzFmt, v.Name)
+	}
+	body := wrapText(text, textW)
+	lt := newLinkTracker(text)
+	off := 0
 	for i := range body {
 		s := body[i]
-		if m.Undecryptable {
+		if isBuzz {
+			s = styleBuzz(s, off, v.Buzz)
+			off += utf8.RuneCountInString(body[i])
+		} else if m.Undecryptable {
 			s = dim.Render(s)
 		} else {
 			s = styleBodyZ(s, v.Me, m.ID, lt.spans(s))
@@ -678,7 +688,7 @@ func (m *Model) viewChat(w, h int) string {
 	var blocks [][]string
 	online := m.isOnline()
 	for i, msg := range m.st.Timeline(conv) {
-		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain}))
+		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now())}))
 	}
 	blocks = spaced(blocks)
 	sel := -1
@@ -875,6 +885,9 @@ func (m *Model) View() string {
 	}
 	lines = lines[:m.h]
 	m.screen = m.screen[:0]
+	if dx := m.buzz.shake(time.Now()); dx != 0 {
+		lines = shiftLines(lines, dx, m.w)
+	}
 	for i, l := range lines {
 		lines[i] = padTo(l, m.w)
 		m.screen = append(m.screen, ansi.Strip(lines[i]))

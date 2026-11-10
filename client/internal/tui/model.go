@@ -57,6 +57,7 @@ type (
 	connClosedMsg  struct{ conn link }
 	reconnectedMsg struct{ conn link }
 	tickMsg        time.Time
+	buzzTickMsg    struct{}
 	fatalMsg       struct{ text string } // reconnecting can never succeed: show why and stop
 )
 
@@ -108,6 +109,7 @@ type Model struct {
 	statusUntil  time.Time
 	reconnecting bool
 	lastTyping   time.Time
+	buzz         buzzState
 	refN         int
 	pending      map[string]*pendingSend
 	retry        []*pendingSend
@@ -243,6 +245,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tickMsg:
 		return m, tick()
+	case buzzTickMsg:
+		return m, m.buzz.next(time.Now())
 	case eventMsg:
 		if msg.conn != m.conn {
 			return m, nil
@@ -322,6 +326,9 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	if fx.Bell {
 		// BEL is zero-width and written in one write(2), so it cannot corrupt a frame.
 		cmds = append(cmds, func() tea.Msg { _, _ = os.Stdout.WriteString("\a"); return nil })
+	}
+	if fx.Buzz && ev.Message != nil && ev.Message.Conv == m.st.Active() {
+		cmds = append(cmds, m.buzz.begin(ev.Message.ID, time.Now()))
 	}
 	switch ev.T {
 	case "hello", "user":
@@ -797,6 +804,20 @@ func (m *Model) command(text string) tea.Cmd {
 	switch fields[0] {
 	case "/quit", "/q":
 		return tea.Quit
+	case "/buzz":
+		if wait := buzzCooldown - time.Since(m.buzz.sent); wait > 0 {
+			m.setStatus(fmt.Sprintf("Easy! You can buzz again in %ds.", int(wait.Seconds())+1))
+			return nil
+		}
+		thread := m.pane == paneThreadInput
+		parent := ""
+		if thread {
+			parent = m.threadRoot
+		}
+		if m.send(&pendingSend{fromThread: thread, conv: m.st.Active(), parent: parent, text: chat.BuzzText}) {
+			m.buzz.sent = time.Now()
+			m.box().Reset()
+		}
 	case "/i":
 		m.box().Reset()
 		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, m.pane == paneThreadInput
@@ -811,6 +832,9 @@ func (m *Model) command(text string) tea.Cmd {
 		}
 		m.box().Reset()
 		m.showProfile(u)
+	case "/iam":
+		m.box().Reset()
+		m.showProfile(m.st.Me())
 	case "/name":
 		if n := utf8.RuneCountInString(arg); n < 1 || n > 32 {
 			m.setStatus("Display name must be 1-32 characters.")
