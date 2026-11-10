@@ -31,7 +31,7 @@ Local development: `cp .dev.vars.example .dev.vars && npx wrangler dev --port 87
 Needs Go 1.24+.
 
 ```sh
-scripts/build.sh https://umbrella.<your-subdomain>.workers.dev
+scripts/build.sh https://umbrella.black-umbrella.workers.dev
 # -> dist/umbrella-{darwin,linux}-{amd64,arm64}, dist/umbrella-windows-amd64.exe
 ```
 

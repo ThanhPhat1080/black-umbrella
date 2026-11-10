@@ -24,8 +24,8 @@ import (
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/tui"
 )
 
-// DefaultServer is baked in at build time: -ldflags "-X main.DefaultServer=https://…".
-var DefaultServer = "http://localhost:8787"
+// DefaultServer is the production server; override at build time with -ldflags "-X main.DefaultServer=…" or at runtime with --server.
+var DefaultServer = "https://umbrella.black-umbrella.workers.dev"
 
 const usage = `Umbrella - end-to-end encrypted terminal chat
 
