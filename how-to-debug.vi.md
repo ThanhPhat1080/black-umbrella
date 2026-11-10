@@ -164,6 +164,8 @@ Kết quả nằm trong `dist/`. Build cho server thật thì thay bằng `https
 
   Nhớ xóa luôn các thư mục `~/.umbrella-dev*` vì tài khoản cũ không còn trên server.
 
+- **`go: go.mod file not found in current directory`:** bạn đang chạy lệnh `go` ở thư mục gốc repo hoặc trong `server/`. Code Go nằm trong `client/`, nên `cd client` trước (kiểm tra: `ls go.mod` phải thấy file).
+
 - **`go` đòi tải phiên bản Go khác:** thêm `GOTOOLCHAIN=local` trước lệnh, ví dụ `GOTOOLCHAIN=local go test ./...`.
 
 - **Xem log server:** mọi request và lỗi hiện ở terminal 1 (`wrangler dev`). Thêm `console.log(...)` trong `server/src/` để in thêm.
