@@ -3,6 +3,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to create, e.g. v0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -34,7 +39,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Umbrella $GITHUB_REF_NAME" \
+          gh release create "$VERSION" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Umbrella $VERSION" \
             --notes-file .github/release-notes.md
