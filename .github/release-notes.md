@@ -13,7 +13,7 @@ First release of **Umbrella** ☂: an end-to-end encrypted terminal chat. Server
 Get an invite code from your admin, then run `umbrella register`, then `umbrella`.
 
 The binaries are unsigned:
-- **macOS:** run `xattr -d com.apple.quarantine <file>`.
+- **macOS:** `sudo mkdir -p /usr/local/bin && sudo mv umbrella-darwin-arm64 /usr/local/bin/umbrella && sudo chmod +x /usr/local/bin/umbrella && sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella`
 - **Windows:** choose SmartScreen → More info → Run anyway.
 
 Verify downloads with `SHA256SUMS.txt`.

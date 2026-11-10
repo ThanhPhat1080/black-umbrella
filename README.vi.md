@@ -48,17 +48,23 @@ Tải file phù hợp với máy bạn ở trang **[Releases](https://github.com
 
 ### macOS
 
+Mac Intel thì thay `arm64` bằng `amd64`. `sudo` sẽ hỏi mật khẩu máy Mac (gõ không hiện ký tự, cứ gõ rồi Enter).
+
 ```bash
-mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella
+sudo mkdir -p /usr/local/bin
 ```
 ```bash
-chmod +x /usr/local/bin/umbrella
+sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella
 ```
 ```bash
-xattr -d com.apple.quarantine /usr/local/bin/umbrella
+sudo chmod +x /usr/local/bin/umbrella
+```
+```bash
+sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella
 ```
 
-> Lệnh `xattr` cần thiết vì file chưa được Apple ký; không có nó macOS sẽ báo "cannot be opened because the developer cannot be verified".
+> - Cần `sudo` vì `/usr/local/bin` thuộc quyền hệ thống (thiếu `sudo` sẽ gặp lỗi `Permission denied`). Trên Mac M1 trở lên thư mục này có thể chưa tồn tại, nên có lệnh `mkdir -p`.
+> - Lệnh `xattr` cần thiết vì file chưa được Apple ký; không có nó macOS sẽ báo "cannot be opened because the developer cannot be verified". Nếu nó báo `No such xattr` thì bỏ qua.
 
 ### Linux
 
