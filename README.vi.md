@@ -336,6 +336,8 @@ Kết quả nằm trong `dist/`. Đăng lên trang Releases của GitHub để m
 
 ## 7. Chạy thử ở máy local
 
+> Hướng dẫn đầy đủ (chạy client với server thật, chạy cả server lẫn client trên máy, test, mẹo debug): **[how-to-debug.vi.md](how-to-debug.vi.md)**.
+
 ```bash
 cd server && cp .dev.vars.example .dev.vars && npx wrangler dev --port 8787
 ```
