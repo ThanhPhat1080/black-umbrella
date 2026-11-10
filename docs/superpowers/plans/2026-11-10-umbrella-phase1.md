@@ -211,9 +211,11 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 
 Behaviour (spec §4–5): layout sidebar(24) | chat | thread(40% when open); bubbles `textarea` (Enter sends, Alt+Enter newline, 4000-rune limit shown as counter); `/i` or click `+` → kaomoji picker overlay (arrows + Enter → insert at cursor + `clip.Copy`); `/whois @u`, clicking a user's avatar → profile overlay; `/name x` → `Name`; message line `■ Name  hh:mm  text  [📋][⚓][💬 N]` with zones via bubblezone; keybindings per spec; typing events throttled 2 s; on `recipients_mismatch` resend once after next `user` event; on connection loss → status bar `Reconnecting…` and `reconnect` with backoff 1,2,4…30 s; terminal bell via `\a` when `Effects.Bell`.
 
-- [ ] **Step 1:** Tests on pure render helpers: `renderMessage` includes `📋` iff message has a link and `⚓` styled when kept; long Vietnamese line wraps at width without splitting runes (`runewidth.StringWidth` of each line ≤ width); thread view with nil root shows `[message expired]`.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS; `go vet ./...` clean.
-- [ ] **Step 5:** Commit `feat(client): terminal UI`.
+- [x] **Step 1:** Tests on pure render helpers: `renderMessage` includes `📋` iff message has a link and `⚓` styled when kept; long Vietnamese line wraps at width without splitting runes (`runewidth.StringWidth` of each line ≤ width); thread view with nil root shows `[message expired]`.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS; `go vet ./...` clean.
+- [x] **Step 5:** Commit `feat(client): terminal UI`.
+
+> **Deviation:** Message buttons are appended to the last body line (header line is '■ Name hh:mm'); the TUI depends on a small `link` interface (satisfied by *api.Conn) for testability; on recipients_mismatch with an unchanged user list the client closes the socket to force a fresh hello and retries once (no REST user list exists). Orphan replies are shown in the timeline (see Task 8). bubblezone v1.0.0 / bubbletea v1.3.10 / lipgloss v1.1.0.
 
 ### Task 11: CLI commands
 
