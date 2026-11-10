@@ -258,11 +258,29 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	if m.ParentID != "" && !v.InThread {
 		head += "  " + dim.Render("↳ reply to "+chat.ExpiredText)
 	}
-	lines = []string{prefix + head}
+	lines = []string{head}
+	own := v.Me != "" && m.Sender == v.Me
+	defer func() {
+		// Own messages hug the right edge (block right-aligned, text left-aligned inside).
+		pad := 0
+		if own {
+			mw := 0
+			for _, l := range lines {
+				mw = maxInt(mw, width(l))
+			}
+			pad = maxInt(0, v.Width-2-mw)
+		}
+		for i := range lines {
+			lines[i] = prefix + strings.Repeat(" ", pad) + lines[i]
+		}
+	}()
 
 	textW := v.Width - 3
 	if textW < 1 {
 		textW = 1
+	}
+	if own && v.Width > 40 {
+		textW = minInt(textW, maxInt(20, v.Width*7/10)) // own messages wrap narrower so they sit visibly right
 	}
 	body := wrapText(m.Text, textW)
 	lt := newLinkTracker(m.Text)
@@ -309,11 +327,11 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 			b += "  " + btnStr
 			btnStr = ""
 		}
-		lines = append(lines, prefix+"  "+b)
+		lines = append(lines, "  "+b)
 	}
 	_ = last
 	if btnStr != "" {
-		lines = append(lines, prefix+"  "+btnStr)
+		lines = append(lines, "  "+btnStr)
 	}
 	return lines
 }
@@ -332,6 +350,14 @@ func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, 
 	for _, r := range replies {
 		blocks = append(blocks, renderMessage(r, msgView{Name: name(r.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
 		idx++
+	}
+	return spaced(blocks)
+}
+
+// spaced adds a blank line under every block but the last, so messages don't touch.
+func spaced(blocks [][]string) [][]string {
+	for i := 0; i < len(blocks)-1; i++ {
+		blocks[i] = append(blocks[i][:len(blocks[i]):len(blocks[i])], "")
 	}
 	return blocks
 }
@@ -629,6 +655,7 @@ func (m *Model) viewChat(w, h int) string {
 	for i, msg := range m.st.Timeline(conv) {
 		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain}))
 	}
+	blocks = spaced(blocks)
 	sel := -1
 	if m.pane == paneMain {
 		sel = m.selMain
