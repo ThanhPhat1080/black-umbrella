@@ -19,4 +19,4 @@ const (
 	maxInputRune = 4000
 )
 
-const helpLine = "Enter send · Alt+Enter newline · Tab focus · Ctrl+N/P switch · ↑/↓ select · y copy link · a keep · r thread · /i kaomoji · Ctrl+T thread/main · Esc close"
+const helpLine = "Enter send · Alt+Enter newline · Tab focus · Ctrl+N/P switch · ↑/↓ select · → open thread · ←/Esc close thread · y copy link · a keep · /i kaomoji · Ctrl+T thread/main · Esc close"

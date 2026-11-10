@@ -84,7 +84,10 @@ type Model struct {
 
 	pane               pane
 	selMain, selThread int
-	threadRoot         string
+	// Scroll state of the message list and thread panel (see window). Updated while rendering.
+	topMain, topThr int
+	pinMain, pinThr bool
+	threadRoot      string
 
 	overlay     overlay
 	pickIdx     int
@@ -122,7 +125,7 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	ta.Placeholder = "Message… (/i for kaomoji)"
 	ta.Focus()
 	return &Model{ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
-		selMain: -1, selThread: -1, pending: map[string]*pendingSend{}, w: 0, h: 0}
+		selMain: -1, selThread: -1, pinMain: true, pinThr: true, pending: map[string]*pendingSend{}, w: 0, h: 0}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -281,6 +284,8 @@ func errorText(code string) string {
 
 func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	var cmds []tea.Cmd
+	mainID, thrID := m.selIDs()
+	defer m.reselect(mainID, thrID)
 	fx := m.st.Apply(ev)
 	if fx.Bell {
 		// BEL is zero-width and written in one write(2), so it cannot corrupt a frame.
@@ -384,8 +389,7 @@ func (m *Model) switchConv(conv string) {
 	m.st.SetActive(conv)
 	m.threadRoot, m.toMain = "", false
 	m.selMain, m.selThread = -1, -1
-	m.pane = paneInput
-	m.input.Focus()
+	m.focusInput()
 	m.resize()
 }
 
@@ -499,13 +503,11 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case keyEsc:
-		switch {
-		case m.threadRoot != "":
-			m.threadRoot, m.toMain = "", false
-			m.resize()
+		if m.threadRoot != "" {
+			m.closeThread() // back to the main list, same message selected
+			return m, nil
 		}
-		m.pane = paneInput
-		m.input.Focus()
+		m.focusInput()
 		return m, nil
 	}
 	if m.pane != paneInput {
@@ -532,6 +534,62 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// focusInput returns focus to the textbox and re-pins both lists to the newest message.
+func (m *Model) focusInput() {
+	m.pane = paneInput
+	m.input.Focus()
+	m.pinMain, m.pinThr = true, true
+}
+
+// closeThread closes the thread panel and focuses the main list on the thread's root.
+func (m *Model) closeThread() {
+	root := m.threadRoot
+	m.threadRoot, m.toMain = "", false
+	m.pinThr = true
+	m.resize()
+	tl := m.st.Timeline(m.st.Active())
+	found := false
+	for i, t := range tl {
+		if t.ID == root {
+			m.selMain, found = i, true
+		}
+	}
+	if !found && (m.selMain < 0 || m.selMain >= len(tl)) {
+		m.selMain = len(tl) - 1
+	}
+	m.pane = paneMain
+	m.input.Blur()
+}
+
+// selIDs / reselect keep the selection on the same messages when the timeline changes underneath.
+func (m *Model) selIDs() (mainID, thrID string) {
+	if tl := m.st.Timeline(m.st.Active()); m.selMain >= 0 && m.selMain < len(tl) {
+		mainID = tl[m.selMain].ID
+	}
+	if _, it := m.threadItems(); m.selThread >= 0 && m.selThread < len(it) {
+		thrID = it[m.selThread].ID
+	}
+	return
+}
+
+func (m *Model) reselect(mainID, thrID string) {
+	if mainID != "" {
+		for i, t := range m.st.Timeline(m.st.Active()) {
+			if t.ID == mainID {
+				m.selMain = i
+			}
+		}
+	}
+	if thrID != "" {
+		_, it := m.threadItems()
+		for i, t := range it {
+			if t.ID == thrID {
+				m.selThread = i
+			}
+		}
+	}
+}
+
 func (m *Model) cycleFocus() {
 	next := map[pane]pane{paneInput: paneMain, paneMain: paneInput, paneThread: paneInput}
 	if m.threadRoot != "" {
@@ -539,7 +597,7 @@ func (m *Model) cycleFocus() {
 	}
 	m.pane = next[m.pane]
 	if m.pane == paneInput {
-		m.input.Focus()
+		m.focusInput()
 		return
 	}
 	m.input.Blur()
@@ -577,6 +635,19 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg, ok := m.selectedMsg(); ok {
 			m.toggleKeep(msg)
 		}
+	case keyRight:
+		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
+			m.openThread(msg)
+			m.pane = paneThread
+			m.input.Blur()
+			m.pinThr = true
+			_, it := m.threadItems()
+			m.selThread = len(it) - 1
+		}
+	case keyLeft:
+		if m.threadRoot != "" {
+			m.closeThread()
+		}
 	case keyOpenThrd:
 		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
 			m.openThread(msg)
@@ -584,8 +655,7 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		// Anything else that types a character belongs to the input: refocus it and forward.
 		if k.Type == tea.KeyRunes || k.Type == tea.KeySpace {
-			m.pane = paneInput
-			m.input.Focus()
+			m.focusInput()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(k)
 			return m, cmd
@@ -612,6 +682,7 @@ func (m *Model) submit() tea.Cmd {
 	}
 	p := &pendingSend{conv: m.st.Active(), parent: parent, text: text}
 	if m.send(p) {
+		m.pinMain, m.pinThr = true, true
 		m.input.Reset()
 		m.lastTyping = time.Time{}
 	}

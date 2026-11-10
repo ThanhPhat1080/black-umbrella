@@ -68,8 +68,9 @@ on any proxy you put in front of the Worker.
 | y | copy the selected message's first link |
 | Ctrl+T | with a thread open: switch the input between replying in the thread and the main chat |
 | a | toggle keep (anchor) on your own message |
-| r | open the selected message's thread |
-| Esc | close thread / picker / return to input |
+| r or Right | open the selected message's thread (Right also moves focus to the thread panel) |
+| Left or Esc | with a thread open: close it and return to the message list with the same message selected |
+| Esc | message list without a thread / picker: return to the input |
 | Ctrl+C or /quit | quit |
 
 Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/quit`.

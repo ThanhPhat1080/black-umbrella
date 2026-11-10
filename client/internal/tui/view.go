@@ -266,27 +266,38 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// window picks the last h lines of the blocks, ending at the selected block (or the end when sel < 0).
-func window(blocks [][]string, sel, h int) []string {
+// window is a scroll window of h lines over all blocks. *top is the first visible line and
+// *pinned means "stuck to the bottom" (the default). A selection never changes what is shown;
+// it only scrolls the minimum needed to keep the selected block visible.
+func window(blocks [][]string, sel, h int, top *int, pinned *bool) []string {
 	var lines []string
-	selEnd := -1
+	selStart, selEnd := -1, -1
 	for i, b := range blocks {
+		if i == sel {
+			selStart = len(lines)
+		}
 		lines = append(lines, b...)
 		if i == sel {
 			selEnd = len(lines)
 		}
 	}
-	end := len(lines)
-	if selEnd >= 0 {
-		end = selEnd
+	maxTop := maxInt(0, len(lines)-h)
+	t := *top
+	if *pinned {
+		t = maxTop
 	}
-	start := end - h
-	if start < 0 {
-		start = 0
+	if selStart >= 0 {
+		if selStart < t {
+			t = selStart
+		} else if selEnd > t+h {
+			t = minInt(selEnd-h, selStart) // a block taller than the window shows its start
+		}
 	}
-	out := lines[start:end]
-	pad := h - len(out)
-	for i := 0; i < pad; i++ {
+	t = clampInt(t, 0, maxTop)
+	*top = t
+	*pinned = t >= maxTop
+	out := append([]string(nil), lines[t:minInt(len(lines), t+h)]...)
+	for len(out) < h {
 		out = append(out, "")
 	}
 	return out
@@ -539,7 +550,7 @@ func (m *Model) viewChat(w, h int) string {
 		sel = m.selMain
 	}
 	lines := []string{title}
-	lines = append(lines, window(blocks, sel, bodyH)...)
+	lines = append(lines, window(blocks, sel, bodyH, &m.topMain, &m.pinMain)...)
 	n := utf8.RuneCountInString(m.input.Value())
 	counter := dim.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
 	if n > maxInputRune-200 {
@@ -585,7 +596,7 @@ func (m *Model) viewThread(w, h int) string {
 		}
 	}
 	lines := []string{nameSt.Render("Thread") + dim.Render("  (Esc to close)")}
-	lines = append(lines, window(blocks, bsel, h-3)...)
+	lines = append(lines, window(blocks, bsel, h-3, &m.topThr, &m.pinThr)...)
 	return paneBox(fit(lines, inner, h-2), inner, m.pane == paneThread)
 }
 

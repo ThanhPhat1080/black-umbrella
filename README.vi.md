@@ -162,8 +162,10 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `y` | copy link trong tin đang chọn |
 | `a` | bật/tắt ⚓ keep (chỉ với tin của bạn) |
 | `r` | mở thread của tin đang chọn |
+| `→` | mở thread của tin đang chọn và chuyển focus sang panel thread |
+| `←` hoặc `Esc` | đóng thread, quay về danh sách tin với tin đó vẫn đang được chọn |
 | `Ctrl+T` | khi đang mở thread: chuyển ô nhập giữa "trả lời trong thread" và "gửi vào chat chính" |
-| `Esc` | đóng thread / bảng kaomoji / profile, quay về ô nhập |
+| `Esc` | (khi không mở thread) đóng bảng kaomoji / profile, quay về ô nhập |
 | `Ctrl+C` | thoát |
 
 Khi đang ở danh sách tin, cứ gõ chữ bình thường — app tự đưa bạn về ô nhập.

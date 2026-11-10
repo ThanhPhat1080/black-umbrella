@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/api"
 	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone"
@@ -392,7 +393,8 @@ func TestThreadReplyTargetIsExplicit(t *testing.T) {
 	if len(s) != 2 || s[0].ParentID != "root1" || s[1].ParentID != "" {
 		t.Fatalf("%+v", s)
 	}
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // closes the thread, focus on the list
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to the input
 	typeAndEnter(m, "after close")
 	if s = f.sends(); s[2].ParentID != "" || m.threadRoot != "" {
 		t.Fatal("thread should be closed and target main")
@@ -784,5 +786,187 @@ func TestNamesColouredEverywhere(t *testing.T) {
 	m.overlay, m.profileUser = overlayProfile, "bob"
 	if v := m.View(); !strings.Contains(v, esc) {
 		t.Fatal("profile name not in bob's colour")
+	}
+}
+
+func fillTimeline(t *testing.T, m *Model, me, bob e2e.KeyPair, n int) []string {
+	t.Helper()
+	var ids []string
+	for i := 1; i <= n; i++ {
+		id := fmt.Sprintf("m%03d", i)
+		pm := sealedMsg(t, bob, me, "bob", id, "hell", "", fmt.Sprintf("tin so %d", i))
+		pm.CreatedAt = int64(1_700_000_000_000 + i*1000)
+		m.onEvent(proto.Event{T: "msg", Message: &pm})
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func press(m *Model, k tea.KeyType) { m.Update(tea.KeyMsg{Type: k}) }
+
+func rowOf(view, needle string) string {
+	for _, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, needle) {
+			return l
+		}
+	}
+	return ""
+}
+
+// Selection is only a highlight: nothing above or below it may disappear.
+func TestSelectionDoesNotHideMessagesBelow(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	fillTimeline(t, m, me, bob, 7)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	press(m, tea.KeyUp)
+	press(m, tea.KeyUp)
+	if m.selMain != 5 {
+		t.Fatalf("sel %d", m.selMain)
+	}
+	v := m.View()
+	for i := 1; i <= 7; i++ {
+		if !strings.Contains(v, fmt.Sprintf("tin so %d", i)) {
+			t.Fatalf("message %d vanished:\n%s", i, v)
+		}
+	}
+	if r := rowOf(v, "tin so 6"); !strings.Contains(r, "▌") {
+		t.Fatalf("selected message not highlighted: %q", r)
+	}
+	if r := rowOf(v, "tin so 7"); strings.Contains(r, "▌") {
+		t.Fatalf("newest wrongly highlighted: %q", r)
+	}
+}
+
+func TestLongTimelineScrollsOnlyAtTheEdge(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	fillTimeline(t, m, me, bob, 40)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 22})
+	m.View()
+	if !strings.Contains(m.View(), "tin so 40") {
+		t.Fatal("default view must be pinned to the newest message")
+	}
+	press(m, tea.KeyUp) // selects the newest
+	m.View()
+	top0 := m.topMain
+	moved := false
+	for i := 0; i < 38 && !moved; i++ {
+		press(m, tea.KeyUp)
+		v := m.View()
+		sel := fmt.Sprintf("tin so %d", m.selMain+1)
+		r := rowOf(v, sel)
+		if r == "" || !strings.Contains(r, "▌") {
+			t.Fatalf("selected %q not visible/highlighted:\n%s", sel, v)
+		}
+		if m.topMain != top0 {
+			moved = true
+			// scrolled only because the selection hit the top edge
+			if !strings.Contains(strings.Split(v, "\n")[2], "▌") && !strings.Contains(strings.Split(v, "\n")[3], "▌") {
+				t.Fatalf("scrolled before the selection reached the top edge:\n%s", v)
+			}
+		} else if i > 30 {
+			t.Fatal("never scrolled")
+		}
+	}
+	if !moved {
+		t.Fatal("never scrolled")
+	}
+	for m.selMain < 39 {
+		press(m, tea.KeyDown)
+		m.View()
+	}
+	if v := m.View(); !strings.Contains(v, "tin so 40") || !strings.Contains(rowOf(v, "tin so 40"), "▌") {
+		t.Fatalf("newest not visible after going back down:\n%s", v)
+	}
+}
+
+func TestNewMessageKeepsSelectionOnSameID(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	ids := fillTimeline(t, m, me, bob, 10)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	press(m, tea.KeyUp)
+	press(m, tea.KeyUp)
+	want := ids[8]
+	if sel, _ := m.selectedMsg(); sel.ID != want {
+		t.Fatalf("setup: %s", sel.ID)
+	}
+	// an older message arrives (sorts before the selection) and one expires
+	old := sealedMsg(t, bob, me, "bob", "m000", "hell", "", "older")
+	old.CreatedAt = 1_699_999_999_000
+	m.onEvent(proto.Event{T: "msg", Message: &old})
+	m.onEvent(proto.Event{T: "expired", IDs: []string{ids[0]}})
+	m.onEvent(proto.Event{T: "expired", IDs: []string{ids[1]}})
+	if sel, ok := m.selectedMsg(); !ok || sel.ID != want {
+		t.Fatalf("selection moved to %q", sel.ID)
+	}
+}
+
+func TestRightOpensThreadLeftClosesKeepingSelection(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	ids := fillTimeline(t, m, me, bob, 5)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	press(m, tea.KeyUp)
+	press(m, tea.KeyUp)
+	press(m, tea.KeyRight)
+	if m.threadRoot != ids[3] || m.pane != paneThread || m.toMain {
+		t.Fatalf("root=%q pane=%v toMain=%v", m.threadRoot, m.pane, m.toMain)
+	}
+	press(m, tea.KeyLeft)
+	if m.threadRoot != "" || m.pane != paneMain {
+		t.Fatalf("root=%q pane=%v", m.threadRoot, m.pane)
+	}
+	if sel, _ := m.selectedMsg(); sel.ID != ids[3] {
+		t.Fatalf("selection lost: %s", sel.ID)
+	}
+	// Esc with a thread open does the same; a second Esc returns to the input
+	press(m, tea.KeyRight)
+	press(m, tea.KeyEsc)
+	if m.threadRoot != "" || m.pane != paneMain {
+		t.Fatalf("esc: root=%q pane=%v", m.threadRoot, m.pane)
+	}
+	if sel, _ := m.selectedMsg(); sel.ID != ids[3] {
+		t.Fatalf("esc lost selection: %s", sel.ID)
+	}
+	press(m, tea.KeyEsc)
+	if m.pane != paneInput {
+		t.Fatal("second Esc should focus the input")
+	}
+}
+
+func TestArrowsInsideInputMoveTheCursorOnly(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	m.conn = &fakeLink{}
+	fillTimeline(t, m, me, bob, 3)
+	m.openThread(m.st.Timeline("hell")[0])
+	m.pane = paneInput
+	m.input.Focus()
+	m.input.SetValue("abc")
+	before := m.input.LineInfo().CharOffset
+	press(m, tea.KeyLeft)
+	if m.input.LineInfo().CharOffset != before-1 || m.threadRoot == "" || m.pane != paneInput {
+		t.Fatalf("left: offset %d->%d root=%q pane=%v", before, m.input.LineInfo().CharOffset, m.threadRoot, m.pane)
+	}
+	press(m, tea.KeyRight)
+	if m.input.LineInfo().CharOffset != before || m.threadRoot == "" || m.pane != paneInput {
+		t.Fatalf("right: offset %d root=%q pane=%v", m.input.LineInfo().CharOffset, m.threadRoot, m.pane)
+	}
+}
+
+func TestThreadPanelScrollsWithoutHidingReplies(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	ids := fillTimeline(t, m, me, bob, 1)
+	for i := 1; i <= 4; i++ {
+		pm := sealedMsg(t, bob, me, "bob", fmt.Sprintf("r%d", i), "hell", ids[0], fmt.Sprintf("tra loi %d", i))
+		pm.CreatedAt = int64(1_700_000_100_000 + i*1000)
+		m.onEvent(proto.Event{T: "msg", Message: &pm})
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	m.openThread(m.st.Timeline("hell")[0])
+	m.pane = paneThread
+	m.selThread = 3
+	v := m.View()
+	for i := 1; i <= 4; i++ {
+		if !strings.Contains(v, fmt.Sprintf("tra loi %d", i)) {
+			t.Fatalf("reply %d hidden:\n%s", i, v)
+		}
 	}
 }
