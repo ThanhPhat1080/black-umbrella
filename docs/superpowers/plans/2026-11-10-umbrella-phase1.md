@@ -235,8 +235,10 @@ Commands: `umbrella` (chat; PIN prompt hidden via `golang.org/x/term`), `umbrell
 **Files:**
 - Create: `client/e2e_test/e2e_test.go` (build tag `e2e`), `scripts/e2e.sh`, `scripts/build.sh`, `README.md`, `.gitignore`
 
-- [ ] **Step 1:** `e2e_test.go` (env `UMBRELLA_E2E_SERVER`): admin invite ×2 → register alice & bob → both dial → alice sends to hell → bob decrypts the text; bob replies in thread; alice keeps; DM alice→bob not visible to a third user carol registered after.
-- [ ] **Step 2:** `scripts/e2e.sh` starts `wrangler dev` with a temp persist dir, waits for port, runs `go test -tags e2e ./e2e_test/`, kills server. Run → PASS.
-- [ ] **Step 3:** `scripts/build.sh <server-url>` → `dist/umbrella-{darwin,linux}-{amd64,arm64}`, `dist/umbrella-windows-amd64.exe`.
-- [ ] **Step 4:** README: deploy (`wrangler login`, `wrangler secret put ADMIN_TOKEN`, `wrangler deploy`), build, onboarding (admin invite → register), key bindings, security model & its limits (trusted key distribution, no forward secrecy, 6-digit PIN key file is brute-forceable if stolen).
-- [ ] **Step 5:** Commit `chore: e2e test, build script, readme`; push branch.
+- [x] **Step 1:** `e2e_test.go` (env `UMBRELLA_E2E_SERVER`): admin invite ×2 → register alice & bob → both dial → alice sends to hell → bob decrypts the text; bob replies in thread; alice keeps; DM alice→bob not visible to a third user carol registered after.
+- [x] **Step 2:** `scripts/e2e.sh` starts `wrangler dev` with a temp persist dir, waits for port, runs `go test -tags e2e ./e2e_test/`, kills server. Run → PASS.
+- [x] **Step 3:** `scripts/build.sh <server-url>` → `dist/umbrella-{darwin,linux}-{amd64,arm64}`, `dist/umbrella-windows-amd64.exe`.
+- [x] **Step 4:** README: deploy (`wrangler login`, `wrangler secret put ADMIN_TOKEN`, `wrangler deploy`), build, onboarding (admin invite → register), key bindings, security model & its limits (trusted key distribution, no forward secrecy, 6-digit PIN key file is brute-forceable if stolen).
+- [x] **Step 5:** Commit `chore: e2e test, build script, readme`; push branch.
+
+> **Deviation:** Commit for Task 11 initially omitted client/cmd because of an over-broad .gitignore entry; fixed in a follow-up commit. Added CLI tests (client/cmd/umbrella/main_test.go) for local wrong-PIN handling. e2e test additionally covers the recipients_mismatch flow, lockout and reconnect-hello dedupe.
