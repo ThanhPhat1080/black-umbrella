@@ -161,13 +161,18 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `Tab` | chuyển giữa ô chat chính và ô trả lời thread (khi thread đang mở); không có thread thì chuyển ô nhập ⇄ danh sách tin |
 | `Ctrl+N` / `Ctrl+P` | sang cuộc trò chuyện kế tiếp / trước đó |
 | `↑` (khi ô nhập trống) | chọn tin nhắn mới nhất, rồi `↑` / `↓` để di chuyển |
+| `o` | mở link trong tin đang chọn bằng trình duyệt (click thẳng vào link cũng mở) |
 | `y` | copy link trong tin đang chọn |
+| `c` | copy nội dung tin đang chọn |
+| `Ctrl+X` | bật/tắt chế độ bôi đen để copy (tắt chuột của app, dùng bôi đen của terminal) |
 | `a` | bật/tắt ⚓ keep (chỉ với tin của bạn) |
 | `r` | mở thread của tin đang chọn |
 | `→` | mở thread của tin đang chọn và chuyển focus sang panel thread |
 | `←` hoặc `Esc` | đóng thread, quay về danh sách tin với tin đó vẫn đang được chọn |
 | `Esc` | (khi không mở thread) đóng bảng kaomoji / profile, quay về ô nhập |
 | `Ctrl+C` | thoát |
+
+Mẹo bôi đen: hầu hết terminal cho phép bỏ qua chuột của app bằng cách giữ `Shift` (Windows Terminal, GNOME Terminal, Konsole) hoặc `Option ⌥` (iTerm2) khi kéo chuột; hoặc dùng `Ctrl+X`.
 
 Khi đang ở danh sách tin, cứ gõ chữ bình thường — app tự đưa bạn về ô nhập.
 

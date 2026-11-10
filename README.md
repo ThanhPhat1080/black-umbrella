@@ -65,12 +65,17 @@ on any proxy you put in front of the Worker.
 | Tab | with a thread open: switch between the main textbox and the thread reply textbox; otherwise input ⇄ message list |
 | Ctrl+N / Ctrl+P | next / previous conversation |
 | Up / Down | select message (when the list is focused) |
+| o | open the selected message's first link in the browser (clicking any link also opens it) |
 | y | copy the selected message's first link |
+| c | copy the selected message's full text |
+| Ctrl+X | toggle select mode: mouse capture off so you can drag-select text and copy it with your terminal |
 | a | toggle keep (anchor) on your own message |
 | r or Right | open the selected message's thread (Right also focuses the thread reply textbox) |
 | Left or Esc | with a thread open: close it and return to the message list with the same message selected |
 | Esc | message list without a thread / picker: return to the input |
 | Ctrl+C or /quit | quit |
+
+Text selection: while the app has the mouse, most terminals still let you bypass it by holding Shift (Windows Terminal, GNOME Terminal, Konsole) or Option ⌥ (iTerm2) while dragging; or use Ctrl+X select mode above.
 
 Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/quit`.
 Mouse: click conversations, avatars, `[+]`, and the `[📋]` `[⚓]` `[💬]` buttons on messages.

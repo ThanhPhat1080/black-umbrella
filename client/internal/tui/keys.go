@@ -15,7 +15,10 @@ const (
 	keyCopyLink  = "y"
 	keyKeep      = "a"
 	keyOpenThrd  = "r"
+	keyOpen      = "o"
+	keyCopyMsg   = "c"
+	keySelect    = "ctrl+x"
 	maxInputRune = 4000
 )
 
-const helpLine = "Enter send · Alt+Enter newline · Tab main/thread box · Ctrl+N/P switch · ↑/↓ select · → open thread · ←/Esc close thread · y copy link · a keep · /i kaomoji · Esc close"
+const helpLine = "Enter send · Alt+Enter newline · Tab main/thread box · Ctrl+N/P switch · ↑/↓ select · → open thread · ←/Esc close thread · o open link · y copy link · c copy message · a keep · Ctrl+X select mode · /i kaomoji · Esc close"

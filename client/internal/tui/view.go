@@ -161,6 +161,77 @@ func italic(s string) string {
 	return italicSt.Render(s)
 }
 
+// linkTracker finds which parts of the wrapped body lines belong to which URL, including URLs
+// that wrapText broke across lines (every fragment stays clickable).
+type linkTracker struct {
+	urls      []string
+	idx       int    // next URL to look for
+	cur       int    // URL currently continuing onto this line (-1: none)
+	remaining string // the rest of that URL
+	frag      int
+}
+
+type linkSpan struct{ start, end, url, frag int }
+
+func newLinkTracker(text string) *linkTracker { return &linkTracker{urls: links.Find(text), cur: -1} }
+
+func (t *linkTracker) spans(line string) []linkSpan {
+	var out []linkSpan
+	pos := 0
+	if t.cur >= 0 && t.remaining != "" {
+		n := minInt(len(t.remaining), len(line))
+		if strings.HasPrefix(t.remaining, line[:n]) && n > 0 {
+			t.frag++
+			out = append(out, linkSpan{0, n, t.cur, t.frag})
+			t.remaining = t.remaining[n:]
+			pos = n
+			if t.remaining != "" {
+				return out
+			}
+		}
+		if t.remaining != "" {
+			t.cur, t.remaining = -1, ""
+		}
+	}
+	for t.idx < len(t.urls) {
+		u := t.urls[t.idx]
+		if i := strings.Index(line[pos:], u); i >= 0 {
+			out = append(out, linkSpan{pos + i, pos + i + len(u), t.idx, 0})
+			pos += i + len(u)
+			t.idx++
+			continue
+		}
+		// the line may end in the first part of the URL
+		start := -1
+		for j := pos; j < len(line); j++ {
+			if line[j] == 'h' && strings.HasPrefix(u, line[j:]) {
+				start = j
+				break
+			}
+		}
+		if start >= 0 {
+			out = append(out, linkSpan{start, len(line), t.idx, 0})
+			t.cur, t.remaining, t.frag = t.idx, u[len(line)-start:], 0
+			t.idx++
+		}
+		break
+	}
+	return out
+}
+
+// styleBodyZ is styleBody with click zones on the link spans.
+func styleBodyZ(line, me, msgID string, spans []linkSpan) string {
+	var out strings.Builder
+	pos := 0
+	for _, sp := range spans {
+		out.WriteString(styleMentions(line[pos:sp.start], me))
+		out.WriteString(zone.Mark(fmt.Sprintf("lnk:%s:%d:%d", msgID, sp.url, sp.frag), linkSt.Italic(true).Render(line[sp.start:sp.end])))
+		pos = sp.end
+	}
+	out.WriteString(styleMentions(line[pos:], me))
+	return out.String()
+}
+
 type msgView struct {
 	Name     string
 	Me       string
@@ -194,12 +265,13 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 		textW = 1
 	}
 	body := wrapText(m.Text, textW)
+	lt := newLinkTracker(m.Text)
 	for i := range body {
 		s := body[i]
 		if m.Undecryptable {
 			s = dim.Render(s)
 		} else {
-			s = styleBody(s, v.Me)
+			s = styleBodyZ(s, v.Me, m.ID, lt.spans(s))
 		}
 		body[i] = s
 	}
@@ -627,6 +699,8 @@ func (m *Model) viewStatus() string {
 	left := accent.Render("Umbrella") + dim.Render(" @"+m.st.Me()+" · ")
 	var right string
 	switch {
+	case m.selectMode:
+		right = accent.Render("Select mode — drag to select, copy with your terminal · Ctrl+X to exit")
 	case m.fatal != "":
 		right = errSt.Render(m.fatal)
 	case m.reconnecting:

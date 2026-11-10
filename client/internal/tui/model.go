@@ -18,7 +18,6 @@ import (
 
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/api"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/chat"
-	"github.com/ThanhPhat1080/black-umbrella/client/internal/clip"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/e2e"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/kaomoji"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/links"
@@ -96,6 +95,7 @@ type Model struct {
 	pickIdx     int
 	profileUser string
 
+	selectMode   bool   // mouse capture off so the terminal can select text
 	pickThread   bool   // the kaomoji picker was opened from the thread box
 	fatal        string // non-empty: connection is permanently gone (revoked / locked)
 	status       string
@@ -507,7 +507,7 @@ func (m *Model) copyLink(msg chat.Msg) {
 		m.setStatus("No link in this message.")
 		return
 	}
-	if err := clip.Copy(ls[0]); err != nil {
+	if err := copyText(ls[0]); err != nil {
 		m.setStatus("Couldn't copy: " + err.Error())
 		return
 	}
@@ -527,6 +527,12 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch s {
+	case keySelect:
+		m.selectMode = !m.selectMode
+		if m.selectMode {
+			return m, tea.DisableMouse
+		}
+		return m, tea.EnableMouseCellMotion
 	case keyNextConv:
 		m.cycleConv(1)
 		return m, nil
@@ -703,6 +709,22 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.threadRoot != "" {
 			m.closeThread()
 		}
+	case keyOpen:
+		if msg, ok := m.selectedMsg(); ok {
+			if ls := links.Find(msg.Text); len(ls) > 0 {
+				m.openLink(ls[0])
+			} else {
+				m.setStatus("No link in this message.")
+			}
+		}
+	case keyCopyMsg:
+		if msg, ok := m.selectedMsg(); ok {
+			if err := copyText(msg.Text); err != nil {
+				m.setStatus("Couldn't copy: " + err.Error())
+			} else {
+				m.setStatus("Copied message")
+			}
+		}
 	case keyOpenThrd:
 		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
 			m.openThread(msg)
@@ -813,7 +835,7 @@ func (m *Model) pickerKey(s string) (tea.Model, tea.Cmd) {
 		} else {
 			m.input.InsertString(k)
 		}
-		_ = clip.Copy(k)
+		_ = copyText(k)
 		m.overlay = overlayNone
 		m.setStatus("Inserted and copied " + k)
 	}
@@ -821,6 +843,9 @@ func (m *Model) pickerKey(s string) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.selectMode {
+		return m, nil
+	}
 	if msg.Action == tea.MouseActionPress {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
@@ -882,6 +907,14 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	_, it := m.threadItems()
 	visible = append(visible, it...)
 	for _, v := range visible {
+		for ui, u := range links.Find(v.Text) {
+			for f := 0; f < 64; f++ {
+				if zone.Get(fmt.Sprintf("lnk:%s:%d:%d", v.ID, ui, f)).InBounds(msg) {
+					m.openLink(u)
+					return m, nil
+				}
+			}
+		}
 		switch {
 		case zone.Get("av:" + v.ID).InBounds(msg):
 			m.showProfile(v.Sender)

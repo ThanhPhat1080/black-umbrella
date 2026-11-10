@@ -713,7 +713,7 @@ func TestMessageStylingItalicBodyColouredName(t *testing.T) {
 	if !strings.Contains(body, "\x1b[3m") {
 		t.Fatalf("body should be italic: %q", body)
 	}
-	if !strings.Contains(body, linkSt.Italic(true).Render("https://a.b/c")+"\x1b[3m.") && !strings.Contains(body, "https://a.b/c") {
+	if !strings.Contains(ansi.Strip(zone.Scan(body)), "https://a.b/c.") {
 		t.Fatalf("link lost: %q", body)
 	}
 	for _, l := range lines {
@@ -1228,5 +1228,137 @@ func TestThreadBoxRendersAndFitsAtAllSizes(t *testing.T) {
 	v := ansi.Strip(m.View())
 	if strings.Count(v, "╭") < 5 || !strings.Contains(v, "0/4000") {
 		t.Fatalf("expected two boxes with counters:\n%s", v)
+	}
+}
+
+func stubOpener(t *testing.T) *[]string {
+	t.Helper()
+	var opened []string
+	old := openURL
+	openURL = func(u string) error { opened = append(opened, u); return nil }
+	t.Cleanup(func() { openURL = old })
+	return &opened
+}
+
+func stubClipboard(t *testing.T) *[]string {
+	t.Helper()
+	var copied []string
+	old := copyText
+	copyText = func(s string) error { copied = append(copied, s); return nil }
+	t.Cleanup(func() { copyText = old })
+	return &copied
+}
+
+func linkModel(t *testing.T, text string) *Model {
+	t.Helper()
+	m, me, bob := newTestModel(t)
+	pm := sealedMsg(t, bob, me, "bob", "l1", "hell", "", text)
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	return m
+}
+
+func TestClickLinkOpensTrimmedURL(t *testing.T) {
+	opened := stubOpener(t)
+	m := linkModel(t, "xem https://a.b/c?d=1, và (http://x.y/z).")
+	z := waitZone(t, m, "lnk:l1:0:0")
+	m.Update(click(z.StartX+2, z.StartY))
+	z = waitZone(t, m, "lnk:l1:1:0")
+	m.Update(click(z.StartX+2, z.StartY))
+	if got := *opened; len(got) != 2 || got[0] != "https://a.b/c?d=1" || got[1] != "http://x.y/z" {
+		t.Fatalf("opened %q", got)
+	}
+}
+
+func TestLinkWrappedAcrossLinesIsClickableOnEveryFragment(t *testing.T) {
+	opened := stubOpener(t)
+	url := "https://example.com/" + strings.Repeat("abcdefghij/", 12)
+	m := linkModel(t, "go "+url+" now")
+	m.Update(tea.WindowSizeMsg{Width: 70, Height: 30}) // narrow enough that the URL wraps
+	var frags int
+	for f := 0; f < 10; f++ {
+		m.View()
+		z := waitZoneMaybe(m, fmt.Sprintf("lnk:l1:0:%d", f))
+		if z == nil {
+			break
+		}
+		frags++
+		m.Update(click(z.StartX, z.StartY))
+	}
+	if frags < 2 {
+		t.Fatalf("expected the URL to wrap into several fragments, got %d", frags)
+	}
+	if len(*opened) != frags {
+		t.Fatalf("opened %d times for %d fragments", len(*opened), frags)
+	}
+	for _, o := range *opened {
+		if o != url {
+			t.Fatalf("opened %q, want the full URL", o)
+		}
+	}
+}
+
+func waitZoneMaybe(m *Model, id string) *zone.ZoneInfo {
+	for i := 0; i < 60; i++ {
+		m.View()
+		if z := zone.Get(id); !z.IsZero() {
+			return z
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil
+}
+
+func TestOKeyOpensFirstLinkAndRejectsOtherSchemes(t *testing.T) {
+	opened := stubOpener(t)
+	m := linkModel(t, "a javascript:alert(1) b https://ok.example/x ftp://nope")
+	m.pane = paneMain
+	m.input.Blur()
+	m.selMain = 0
+	typeInto(m, "o")
+	if got := *opened; len(got) != 1 || got[0] != "https://ok.example/x" {
+		t.Fatalf("opened %q", got)
+	}
+	for _, bad := range []string{"javascript:alert(1)", "ftp://x.y", "file:///etc/passwd", "https://a b/c", "https://a.b/\x07", "https://", "", "-h http://x"} {
+		m.openLink(bad)
+	}
+	if len(*opened) != 1 {
+		t.Fatalf("invalid URLs reached the opener: %q", *opened)
+	}
+}
+
+func TestCKeyCopiesWholeMessage(t *testing.T) {
+	copied := stubClipboard(t)
+	m := linkModel(t, "dòng 1\ndòng 2 🌂")
+	m.pane = paneMain
+	m.input.Blur()
+	m.selMain = 0
+	typeInto(m, "c")
+	if len(*copied) != 1 || (*copied)[0] != "dòng 1\ndòng 2 🌂" || m.status != "Copied message" {
+		t.Fatalf("copied=%q status=%q", *copied, m.status)
+	}
+}
+
+func TestSelectModeTogglesMouseCapture(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if cmd == nil || fmt.Sprintf("%T", cmd()) != fmt.Sprintf("%T", tea.DisableMouse()) || !m.selectMode {
+		t.Fatalf("enter select mode: cmd=%v mode=%v", cmd != nil, m.selectMode)
+	}
+	if v := m.View(); !strings.Contains(v, "Select mode") || !strings.Contains(v, "Ctrl+X to exit") {
+		t.Fatalf("status bar:\n%s", v)
+	}
+	// clicks are ignored while selecting
+	z := waitZone(t, m, "plus")
+	m.Update(click(z.StartX+1, z.StartY))
+	if m.overlay != overlayNone {
+		t.Fatal("click acted in select mode")
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if cmd == nil || fmt.Sprintf("%T", cmd()) != fmt.Sprintf("%T", tea.EnableMouseCellMotion()) || m.selectMode {
+		t.Fatal("leave select mode")
+	}
+	m.Update(click(z.StartX+1, z.StartY))
+	if m.overlay != overlayPicker {
+		t.Fatal("clicks should work again")
 	}
 }
