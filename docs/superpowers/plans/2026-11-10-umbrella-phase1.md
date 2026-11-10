@@ -227,8 +227,8 @@ Behaviour (spec §4–5): layout sidebar(24) | chat | thread(40% when open); bub
 
 Commands: `umbrella` (chat; PIN prompt hidden via `golang.org/x/term`), `umbrella register` (prompts invite, username, display name, PIN twice; generates key; saves key file; refuses to overwrite an existing key file without `--force`), `umbrella export-key <file>`, `umbrella admin invite|reset <user>|unlock <user>` (admin token from `UMBRELLA_ADMIN_TOKEN` or prompt). Global flag `--server`. Wrong local PIN → `Wrong PIN.` exit 1 without network; 423 → `Account locked until 15:04.`
 
-- [ ] **Step 1:** `go build ./... && go vet ./...` clean; `./umbrella --help` lists the commands.
-- [ ] **Step 2:** Commit `feat(client): cli commands`.
+- [x] **Step 1:** `go build ./... && go vet ./...` clean; `./umbrella --help` lists the commands.
+- [x] **Step 2:** Commit `feat(client): cli commands`.
 
 ### Task 12: End-to-end test, build script, README
 
