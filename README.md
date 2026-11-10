@@ -1,5 +1,7 @@
 # Umbrella
 
+[**English**](README.md) · [Tiếng Việt](README.vi.md)
+
 End-to-end encrypted terminal chat for a small team: a Hell room, direct messages, threads,
 a keep (anchor) button and 24-hour message expiry. A Cloudflare Worker + Durable Object stores
 ciphertext only; a cross-platform Go TUI client (`umbrella`) does all the cryptography.
