@@ -166,9 +166,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `proto.User`, `proto.Message`, `proto.Event{T string; Me string; Users []User; Messages []Message; Message *Message; Ref, ID, Conv, Username, Error string; Kept bool; IDs []string; User *User; Until int64}`, outbound structs `Send`, `Keep`, `Typing`, `Name`; `type Client struct{ BaseURL string; HTTP *http.Client }`; `Register(ctx, RegisterReq) (token string, err error)`; `Login(ctx, user, pin) (string, error)`; `AdminInvite/AdminReset/AdminUnlock(ctx, adminToken, …)`; `type APIError struct{ Status int; Code string; Until int64 }`; `Dial(ctx, baseURL, token) (*Conn, error)` with `Conn.Events() <-chan proto.Event`, `Conn.Send(v any) error`, `Conn.Close()`.
 
-- [ ] **Step 1:** Tests: Login 423 → `*APIError{Status:423, Code:"locked", Until:…}`; Register posts exact JSON field names from the wire table; ws URL derived `https→wss`, `http→ws`.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): api client`.
+- [x] **Step 1:** Tests: Login 423 → `*APIError{Status:423, Code:"locked", Until:…}`; Register posts exact JSON field names from the wire table; ws URL derived `https→wss`, `http→ws`.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): api client`.
 
 ### Task 8: Chat state model (pure)
 
@@ -180,9 +180,11 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 - Consumes: `proto`, `e2e`.
 - Produces: `type Msg struct{ ID, Conv, Sender, ParentID, Text string; CreatedAt time.Time; Kept, Undecryptable bool; Replies int }`; `type State struct{…}`; `New(me string, kp e2e.KeyPair) *State`; `(*State) Apply(ev proto.Event) (Effects)` where `Effects{ Bell bool }`; `Timeline(conv) []Msg` (roots only, oldest first); `Thread(rootID) (root *Msg, replies []Msg)` (root nil-safe → placeholder `Msg{Text:"[message expired]"}`); `Sidebar() []Entry{Conv, Label, Username string; Online bool; Unread int}` (hell first, then online, then alpha); `SetActive(conv)` clears unread; `Recipients(conv) map[string][32]byte`; `Typing(conv, now) []string`; `Users() map[string]proto.User`; `Mentions(text, me) bool`.
 
-- [ ] **Step 1:** Tests: `hello` replaces state (applying twice → no duplicates); `msg` in inactive conv increments unread; `@me` in hell → `Bell` and unread; `expired` removes messages and decrements root reply counts; reply whose root missing → `Thread` returns placeholder root; `kept` toggles; sidebar ordering (`hell`, online `bob`, online `zed`, offline `amy`); typing entry disappears after 4 s; `Recipients("hell")` = all users with keys; DM conv for me+bob is `dm:bob|me` sorted.
-- [ ] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): chat state model`.
+- [x] **Step 1:** Tests: `hello` replaces state (applying twice → no duplicates); `msg` in inactive conv increments unread; `@me` in hell → `Bell` and unread; `expired` removes messages and decrements root reply counts; reply whose root missing → `Thread` returns placeholder root; `kept` toggles; sidebar ordering (`hell`, online `bob`, online `zed`, offline `amy`); typing entry disappears after 4 s; `Recipients("hell")` = all users with keys; DM conv for me+bob is `dm:bob|me` sorted.
+- [x] **Step 2:** FAIL. **Step 3:** implement. **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): chat state model`.
+
+> **Deviation:** Orphan replies (root expired) are included in Timeline so they remain reachable; Thread never returns a nil root. Typing/Mentions as specified.
 
 ### Task 9: Avatar, links, kaomoji, clipboard
 
@@ -193,9 +195,9 @@ Tables: `users(username PK, display_name, pin_hash, pin_salt, public_key, joined
 **Interfaces:**
 - Produces: `avatar.Grid(username) (grid [5][5]bool, color string)` (hex `#rrggbb`); `avatar.Render(username) []string` (3 lines, each 10 cells wide); `avatar.Dot(username) string` (coloured `■`); `links.Find(text) []string`; `kaomoji.All []string` (exactly 50, unique); `clip.Copy(s string) error` (atotto, fallback OSC 52 to stdout).
 
-- [ ] **Step 1:** Tests: grid deterministic and column-symmetric (`g[r][c]==g[r][4-c]`); `Render` returns 3 lines of display width 10; `links.Find("xem https://a.b/c?d=1, và http://x.y")` → both URLs without trailing comma; `len(kaomoji.All)==50` and unique.
-- [ ] **Step 2:** FAIL. **Step 3:** implement (half-block rows: pair rows (0,1),(2,3),(4,—)). **Step 4:** PASS.
-- [ ] **Step 5:** Commit `feat(client): avatar, links, kaomoji, clipboard`.
+- [x] **Step 1:** Tests: grid deterministic and column-symmetric (`g[r][c]==g[r][4-c]`); `Render` returns 3 lines of display width 10; `links.Find("xem https://a.b/c?d=1, và http://x.y")` → both URLs without trailing comma; `len(kaomoji.All)==50` and unique.
+- [x] **Step 2:** FAIL. **Step 3:** implement (half-block rows: pair rows (0,1),(2,3),(4,—)). **Step 4:** PASS.
+- [x] **Step 5:** Commit `feat(client): avatar, links, kaomoji, clipboard`.
 
 ### Task 10: TUI
 
