@@ -499,7 +499,7 @@ func (m *Model) viewChat(w, h int) string {
 		}
 		title += "  " + dim.Italic(true).Render(strings.Join(names, ", ")+" is typing…")
 	}
-	inH := m.input.Height() + 1
+	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
 	var target string
 	if m.threadRoot != "" {
 		inH++
@@ -533,7 +533,13 @@ func (m *Model) viewChat(w, h int) string {
 	if target != "" {
 		lines = append(lines, target)
 	}
-	lines = append(lines, strings.Split(m.input.View(), "\n")...)
+	var boxed []string
+	for _, l := range strings.Split(m.input.View(), "\n") {
+		boxed = append(boxed, " "+l)
+	}
+	// The whole box (border included) is one click zone that focuses the input.
+	box := paneBox(fit(boxed, inner-2, m.input.Height()), inner-2, m.pane == paneInput)
+	lines = append(lines, strings.Split(zone.Mark("input", box), "\n")...)
 	lines = append(lines, foot)
 	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread)
 }

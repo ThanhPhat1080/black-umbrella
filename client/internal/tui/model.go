@@ -114,12 +114,12 @@ func Run(ctx context.Context, conn *api.Conn, st *chat.State, kp e2e.KeyPair, re
 
 func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, reconnect func(context.Context) (*api.Conn, error)) *Model {
 	ta := textarea.New()
-	ta.Prompt = "› "
+	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.CharLimit = maxInputRune
 	ta.SetHeight(3)
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
-	ta.Placeholder = "Message… (/i kaomoji, /whois @user, /name <name>, /quit)"
+	ta.Placeholder = "Message… (/i for kaomoji)"
 	ta.Focus()
 	return &Model{ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
 		selMain: -1, selThread: -1, pending: map[string]*pendingSend{}, w: 0, h: 0}
@@ -209,7 +209,7 @@ func minInt(a, b int) int {
 
 func (m *Model) resize() {
 	_, cw, _ := m.layout()
-	m.input.SetWidth(maxInt(10, cw-4))
+	m.input.SetWidth(maxInt(10, cw-6)) // pane border + box border + 1 space padding each side
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -716,6 +716,12 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.overlay = overlayNone
+		return m, nil
+	}
+	if zone.Get("input").InBounds(msg) {
+		// Clicking the textbox focuses it; the thread/main reply target is left alone.
+		m.pane = paneInput
+		m.input.Focus()
 		return m, nil
 	}
 	if zone.Get("plus").InBounds(msg) {

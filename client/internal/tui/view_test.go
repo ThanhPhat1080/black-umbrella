@@ -464,7 +464,7 @@ func TestOverlayCompositesByCellsOverBackground(t *testing.T) {
 	m, me, bob := newTestModel(t)
 	pm := sealedMsg(t, bob, me, "bob", "a", "hell", "", "(☞ﾟヮﾟ)☞ Tiếng Việt")
 	m.onEvent(proto.Event{T: "msg", Message: &pm})
-	for _, size := range [][2]int{{120, 35}, {80, 24}} {
+	for _, size := range [][2]int{{120, 35}, {80, 24}, {40, 12}} {
 		w, h := size[0], size[1]
 		m.Update(tea.WindowSizeMsg{Width: w, Height: h})
 		m.overlay = overlayNone
@@ -580,5 +580,142 @@ func TestHellRoomLabel(t *testing.T) {
 	m, _, _ := newTestModel(t)
 	if v := m.View(); strings.Count(v, "Hell room") < 2 {
 		t.Fatalf("sidebar and header should both say Hell room:\n%s", v)
+	}
+}
+
+// waitZone renders (so zones are registered) and waits for bubblezone's async scanner.
+func waitZone(t *testing.T, m *Model, id string) *zone.ZoneInfo {
+	t.Helper()
+	m.View()
+	for i := 0; i < 200; i++ {
+		if z := zone.Get(id); !z.IsZero() {
+			return z
+		}
+		time.Sleep(5 * time.Millisecond)
+		m.View()
+	}
+	t.Fatalf("zone %q was never registered by View()", id)
+	return nil
+}
+
+func click(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{X: x, Y: y, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft}
+}
+
+func TestClickInsideInputBoxFocusesIt(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	m.conn = &fakeLink{}
+	pm := sealedMsg(t, bob, me, "bob", "r1", "hell", "", "root")
+	m.onEvent(proto.Event{T: "msg", Message: &pm})
+	m.openThread(m.st.Timeline("hell")[0])
+	m.pane = paneMain
+	m.input.Blur()
+	z := waitZone(t, m, "input")
+	if z.EndY-z.StartY != 4 { // top border + 3 text lines + bottom border
+		t.Fatalf("input box spans %d rows, want 5: %+v", z.EndY-z.StartY+1, z)
+	}
+	for _, toMain := range []bool{false, true} {
+		m.toMain = toMain
+		m.pane = paneMain
+		m.input.Blur()
+		// the border itself and the text area both count
+		for _, pt := range [][2]int{{z.StartX, z.StartY}, {z.StartX + 5, z.StartY + 2}, {z.EndX, z.EndY}} {
+			m.pane = paneMain
+			m.input.Blur()
+			m.Update(click(pt[0], pt[1]))
+			if m.pane != paneInput || !m.input.Focused() {
+				t.Fatalf("click %v: pane=%v focused=%v", pt, m.pane, m.input.Focused())
+			}
+			if m.toMain != toMain {
+				t.Fatalf("click changed the reply target (toMain=%v)", m.toMain)
+			}
+		}
+	}
+	// typing now lands in the input
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.input.Value() != "x" {
+		t.Fatalf("%q", m.input.Value())
+	}
+	// a click just outside the box does not
+	m.pane = paneMain
+	m.input.Blur()
+	m.Update(click(z.StartX, z.StartY-2))
+	if m.pane == paneInput {
+		t.Fatal("click above the box focused the input")
+	}
+}
+
+func TestClickPlusAndSidebarEntry(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	z := waitZone(t, m, "plus")
+	m.Update(click(z.StartX+1, z.StartY))
+	if m.overlay != overlayPicker {
+		t.Fatal("[+] did not open the picker")
+	}
+	m.overlay = overlayNone
+	sz := waitZone(t, m, "side:dm:bob|me:0")
+	m.Update(click(sz.StartX+2, sz.StartY))
+	if m.st.Active() != "dm:bob|me" {
+		t.Fatalf("active %q", m.st.Active())
+	}
+	az := waitZone(t, m, "avs:bob:0")
+	m.Update(click(az.StartX+1, az.StartY))
+	if m.overlay != overlayProfile || m.profileUser != "bob" {
+		t.Fatalf("avatar click: overlay=%v user=%q", m.overlay, m.profileUser)
+	}
+}
+
+func TestClickMessageButtons(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	f := &fakeLink{}
+	m.conn = f
+	other := sealedMsg(t, bob, me, "bob", "m1", "hell", "", "see https://a.b/c")
+	m.onEvent(proto.Event{T: "msg", Message: &other})
+	mine := sealedMsg(t, me, me, "me", "m2", "hell", "", "mine")
+	m.onEvent(proto.Event{T: "msg", Message: &mine})
+	z := waitZone(t, m, "keep:m2")
+	m.Update(click(z.StartX+1, z.StartY))
+	if k := f.sent[len(f.sent)-1]; k != proto.NewKeep("m2", true) {
+		t.Fatalf("keep click sent %+v", k)
+	}
+	z = waitZone(t, m, "thr:m1")
+	m.Update(click(z.StartX+1, z.StartY))
+	if m.threadRoot != "m1" {
+		t.Fatalf("thread %q", m.threadRoot)
+	}
+	if z := zone.Get("keep:m1"); !z.IsZero() {
+		t.Fatal("others' messages must not have a keep button")
+	}
+}
+
+func TestInputBoxRendersBorderedAndFocusStyled(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	defer lipgloss.SetColorProfile(old)
+	m, _, _ := newTestModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	focused := m.View()
+	m.pane = paneMain
+	m.input.Blur()
+	blurred := m.View()
+	plain := ansi.Strip(focused)
+	lines := strings.Split(plain, "\n")
+	var top int = -1
+	for i, l := range lines {
+		if strings.Contains(l, "Message") && strings.Contains(l, "│") && i > 0 && strings.Contains(lines[i-1], "╭") {
+			top = i - 1
+		}
+	}
+	if top < 0 {
+		t.Fatalf("no bordered input with placeholder:\n%s", plain)
+	}
+	if !strings.Contains(lines[top+4], "╰") || !strings.Contains(lines[top+5], "kaomoji") {
+		t.Fatalf("box must be 3 text lines, with the [+] line right below:\n%s", strings.Join(lines[top:top+6], "\n"))
+	}
+	if focused == blurred {
+		t.Fatal("focus must change the border colour")
+	}
+	if !strings.Contains(focused, accent.Render("╭")) && !strings.Contains(focused, "\x1b[38;5;39m╭") {
+		t.Fatal("focused border should use the accent colour")
 	}
 }
