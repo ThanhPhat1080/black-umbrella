@@ -16,6 +16,7 @@ import (
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/chat"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/kaomoji"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/links"
+	"github.com/ThanhPhat1080/black-umbrella/client/internal/proto"
 )
 
 var (
@@ -119,7 +120,52 @@ func splitTokens(s string) []string {
 	return toks
 }
 
-var mentionRe = regexp.MustCompile(`@[A-Za-z0-9_]+`)
+var mentionRe = regexp.MustCompile(`(?:●\x{00a0})?@[A-Za-z0-9_]+`)
+
+// chipDot precedes a mention of a known user so that line wrapping leaves room for the presence dot
+// drawn there; chipRe finds the mentions that get one (@name at the start or after whitespace).
+const chipDot = "●\u00a0" // dot + no-break space, so wrapping never splits the chip
+
+var chipRe = regexp.MustCompile(`(^|\s)@([A-Za-z0-9_]+)`)
+
+// chipLookup resolves a typed name to a known user (canonical username, online) .
+type chipLookup func(name string) (user string, online, ok bool)
+
+// chipText puts chipDot in front of every mention of a known user.
+func chipText(text string, look chipLookup) string {
+	if look == nil {
+		return text
+	}
+	return chipRe.ReplaceAllStringFunc(text, func(tok string) string {
+		sub := chipRe.FindStringSubmatch(tok)
+		if _, _, ok := look(sub[2]); !ok {
+			return tok
+		}
+		return sub[1] + chipDot + "@" + sub[2]
+	})
+}
+
+// chipUsers lists the users behind the chips of text, in order (the index is the click-zone number).
+func chipUsers(text string, look chipLookup) []string {
+	if look == nil {
+		return nil
+	}
+	var out []string
+	for _, sub := range chipRe.FindAllStringSubmatch(text, -1) {
+		if u, _, ok := look(sub[2]); ok {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// chipCtx carries what drawing the chips of one message needs.
+type chipCtx struct {
+	id    string
+	look  chipLookup
+	hover string
+	n     int // chips drawn so far in this message
+}
 
 // styleBody styles a (wrapped) body line: italic text, links underlined, mentions of me highlighted.
 func styleBody(line, me string) string {
@@ -130,24 +176,42 @@ func styleBody(line, me string) string {
 		if i < 0 {
 			continue
 		}
-		out.WriteString(styleMentions(rest[:i], me))
+		out.WriteString(styleMentions(rest[:i], me, nil))
 		out.WriteString(linkSt.Italic(true).Render(u))
 		rest = rest[i+len(u):]
 	}
-	out.WriteString(styleMentions(rest, me))
+	out.WriteString(styleMentions(rest, me, nil))
 	return out.String()
 }
 
-func styleMentions(s, me string) string {
+func styleMentions(s, me string, c *chipCtx) string {
 	var out strings.Builder
 	pos := 0
-	if me != "" {
-		for _, loc := range mentionRe.FindAllStringIndex(s, -1) {
-			if !strings.EqualFold(s[loc[0]+1:loc[1]], me) {
+	for _, loc := range mentionRe.FindAllStringIndex(s, -1) {
+		tok := s[loc[0]:loc[1]]
+		isChip := strings.HasPrefix(tok, chipDot)
+		name := strings.TrimPrefix(strings.TrimPrefix(tok, chipDot), "@")
+		switch {
+		case isChip && c != nil:
+			user, online, ok := c.look(name)
+			if !ok {
 				continue
 			}
+			id := fmt.Sprintf("men:%s:%d", c.id, c.n)
+			c.n++
+			st := nameStyle(user)
+			if user == me {
+				st = mentionSt
+			}
+			if c.hover == id {
+				st = st.Underline(true)
+			}
 			out.WriteString(italic(s[pos:loc[0]]))
-			out.WriteString(mentionSt.Italic(true).Render(s[loc[0]:loc[1]]))
+			out.WriteString(zone.Mark(id, presenceDot(online)+" "+st.Italic(true).Render("@"+name)))
+			pos = loc[1]
+		case !isChip && me != "" && strings.EqualFold(name, me):
+			out.WriteString(italic(s[pos:loc[0]]))
+			out.WriteString(mentionSt.Italic(true).Render(tok))
 			pos = loc[1]
 		}
 	}
@@ -221,15 +285,15 @@ func (t *linkTracker) spans(line string) []linkSpan {
 }
 
 // styleBodyZ is styleBody with click zones on the link spans.
-func styleBodyZ(line, me, msgID string, spans []linkSpan) string {
+func styleBodyZ(line, me, msgID string, spans []linkSpan, c *chipCtx) string {
 	var out strings.Builder
 	pos := 0
 	for _, sp := range spans {
-		out.WriteString(styleMentions(line[pos:sp.start], me))
+		out.WriteString(styleMentions(line[pos:sp.start], me, c))
 		out.WriteString(zone.Mark(fmt.Sprintf("lnk:%s:%d:%d", msgID, sp.url, sp.frag), linkSt.Italic(true).Render(line[sp.start:sp.end])))
 		pos = sp.end
 	}
-	out.WriteString(styleMentions(line[pos:], me))
+	out.WriteString(styleMentions(line[pos:], me, c))
 	return out.String()
 }
 
@@ -242,6 +306,8 @@ type msgView struct {
 	Online   bool // sender's presence, shown as the dot in the header
 	Buzz     buzzAnim
 	Dance    buzzAnim
+	User     chipLookup // resolves @mentions to users (nil: mentions stay plain text)
+	Hover    string     // id of the click zone under the mouse
 }
 
 func presenceDot(online bool) string {
@@ -274,7 +340,11 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	bodyN := 0 // number of body lines (set once the body is drawn)
 	dot := zone.Mark("av:"+m.ID, presenceDot(v.Online))
 	stamp := dim.Render(m.CreatedAt.Local().Format("15:04"))
-	name := nameStyle(m.Sender).Render(v.Name)
+	nst := nameStyle(m.Sender)
+	if v.Hover == "nm:"+m.ID {
+		nst = nst.Underline(true)
+	}
+	name := zone.Mark("nm:"+m.ID, nst.Render(v.Name))
 	var head string
 	if own {
 		head = stamp + "  " + name + " " + dot
@@ -336,8 +406,12 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	} else if m.Text == chat.DanceText && !m.Undecryptable {
 		body = danceBody(m.ID, v.Name, v.Dance)
 	} else {
-		body = wrapText(text, textW)
+		body = wrapText(chipText(text, v.User), textW)
 		lt := newLinkTracker(text)
+		var chips *chipCtx
+		if v.User != nil && !isBuzz && !m.Undecryptable {
+			chips = &chipCtx{id: m.ID, look: v.User, hover: v.Hover}
+		}
 		off := 0
 		for i := range body {
 			s := body[i]
@@ -347,7 +421,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 			} else if m.Undecryptable {
 				s = dim.Render(s)
 			} else {
-				s = styleBodyZ(s, v.Me, m.ID, lt.spans(s))
+				s = styleBodyZ(s, v.Me, m.ID, lt.spans(s), chips)
 			}
 			body[i] = s
 		}
@@ -390,18 +464,24 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 }
 
 // renderThread renders the thread panel body: the root (a placeholder when nil or expired) then replies.
-func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, online func(string) bool, me string, width, sel int) [][]string {
+func renderThread(root *chat.Msg, replies []chat.Msg, name func(string) string, online func(string) bool, me string, width, sel int, opts ...func(*msgView)) [][]string {
 	var blocks [][]string
+	mk := func(v msgView) msgView {
+		for _, o := range opts {
+			o(&v)
+		}
+		return v
+	}
 	idx := 0
 	if root == nil || root.Text == chat.ExpiredText && root.Sender == "" {
 		blocks = append(blocks, []string{" " + dim.Render(chat.ExpiredText)})
 	} else {
-		blocks = append(blocks, renderMessage(*root, msgView{Name: name(root.Sender), Online: online(root.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
+		blocks = append(blocks, renderMessage(*root, mk(msgView{Name: name(root.Sender), Online: online(root.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true})))
 		idx++
 	}
 	blocks = append(blocks, []string{" " + dim.Render(strings.Repeat("─", maxInt(1, width-2)))})
 	for _, r := range replies {
-		blocks = append(blocks, renderMessage(r, msgView{Name: name(r.Sender), Online: online(r.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true}))
+		blocks = append(blocks, renderMessage(r, mk(msgView{Name: name(r.Sender), Online: online(r.Sender), Me: me, Width: width, Selected: sel == idx, InThread: true})))
 		idx++
 	}
 	return spaced(blocks)
@@ -571,6 +651,9 @@ func (m *Model) convTitle(conv string) string {
 	if conv == "hell" {
 		return nameSt.Render("# Hell room")
 	}
+	if r, ok := m.st.RoomOf(conv); ok {
+		return nameSt.Render("◈ "+r.Name) + dim.Render(fmt.Sprintf("  %d members", len(r.Members)))
+	}
 	for _, e := range m.st.Sidebar() {
 		if e.Conv == conv {
 			return nameStyle(e.Username).Render(e.Label) + " " + dim.Render("@"+e.Username)
@@ -607,9 +690,13 @@ func (m *Model) viewSidebar(w, h int) string {
 	activeLine := 0
 	section := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("244")).Faint(true)
 	lines = append(lines, section.Render("Channel"))
-	firstUser := true
+	firstUser, firstRoom := true, true
 	for _, e := range m.st.Sidebar() {
-		if e.Conv != "hell" {
+		if e.Room && firstRoom {
+			lines = append(lines, dim.Render(" "+strings.Repeat("─", maxInt(1, inner-2))), section.Render("Rooms"))
+			firstRoom = false
+		}
+		if e.Conv != "hell" && !e.Room {
 			if firstUser {
 				lines = append(lines, dim.Render(" "+strings.Repeat("─", maxInt(1, inner-2))), section.Render("User"), "")
 				firstUser = false
@@ -629,6 +716,16 @@ func (m *Model) viewSidebar(w, h int) string {
 				row = nameSt.Render("# Hell room")
 			}
 			row = zone.Mark("side:hell", padTo(row, inner))
+		} else if e.Room {
+			nameW := inner - 2
+			if badgeW > 0 {
+				nameW -= badgeW + 1
+			}
+			rest := accent.Render("◈") + " " + padTo(nameSt.Render(truncate(e.Label, maxInt(1, nameW))), maxInt(1, nameW))
+			if badgeW > 0 {
+				rest += " " + badge
+			}
+			row = zone.Mark("side:"+e.Conv, padTo(rest, inner))
 		} else {
 			dot := dim.Render("○")
 			if e.Online {
@@ -650,6 +747,8 @@ func (m *Model) viewSidebar(w, h int) string {
 		if e.Conv == active {
 			activeLine = len(lines)
 			row = bgFill(row, inner, activeBg)
+		} else if m.hover == "side:"+e.Conv || (e.Username != "" && m.hover == "avs:"+e.Username) {
+			row = bgFill(row, inner, selectBg)
 		}
 		lines = append(lines, row)
 	}
@@ -755,13 +854,17 @@ func (m *Model) viewChat(w, h int) string {
 	}
 	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
 	bodyH := h - 2 - 1 - inH - 1    // one blank row keeps the text off the textbox
+	room, isRoom := m.activeRoom()
+	if isRoom {
+		bodyH -= 2 // member list + separator under the title
+	}
 	if bodyH < 1 {
 		bodyH = 1
 	}
 	var blocks [][]string
 	online := m.isOnline()
 	for i, msg := range m.st.Timeline(conv) {
-		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now()), Dance: m.dance.anim(msg.ID, time.Now())}))
+		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now()), Dance: m.dance.anim(msg.ID, time.Now()), User: m.chipLookup(), Hover: m.hover}))
 	}
 	blocks = spaced(blocks)
 	sel := -1
@@ -769,8 +872,14 @@ func (m *Model) viewChat(w, h int) string {
 		sel = m.selMain
 	}
 	lines := []string{title}
+	if isRoom {
+		lines = append(lines, m.roomMembersLine(room, inner), dim.Render(strings.Repeat("─", inner)))
+	}
 	lines = append(lines, window(blocks, sel, bodyH, &m.topMain, &m.pinMain)...)
-	lines = append(lines, "")
+	lines = append(lines, dim.Italic(true).Render(truncate(m.roomNotice(), maxInt(1, inner))))
+	if pop := m.mentionPopup(inner, false); pop != nil {
+		lines = overlayAbove(lines, pop, len(lines), 1, inner)
+	}
 	n := utf8.RuneCountInString(m.input.Value())
 	counter := dim.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
 	if n > maxInputRune-200 {
@@ -789,6 +898,28 @@ func (m *Model) viewChat(w, h int) string {
 	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput)
 }
 
+// roomMembersLine lists the room's people as "[ ● A, ○ B ]" (green dot = online); the owner is
+// picked out in the accent colour and marked "(owner)".
+func (m *Model) roomMembersLine(r proto.Room, w int) string {
+	on := m.isOnline()
+	var parts []string
+	for _, u := range r.Members {
+		dot := dim.Render("○")
+		if on(u) {
+			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
+		}
+		st, label := nameStyle(u), m.nameOf(u)
+		if u == r.Owner {
+			st, label = accent.Bold(true), label+" (owner)"
+		}
+		if m.hover == "rm:"+u {
+			st = st.Underline(true)
+		}
+		parts = append(parts, zone.Mark("rm:"+u, dot+" "+st.Render(label)))
+	}
+	return fit([]string{dim.Render("[ ") + strings.Join(parts, dim.Render(", ")) + dim.Render(" ]")}, w, 1)
+}
+
 func (m *Model) viewThread(w, h int) string {
 	inner := w - 2
 	root, replies := m.st.Thread(m.threadRoot)
@@ -799,7 +930,8 @@ func (m *Model) viewThread(w, h int) string {
 	if m.pane == paneThread {
 		sel = m.selThread
 	}
-	blocks := renderThread(root, replies, m.nameOf, m.isOnline(), m.st.Me(), inner, sel)
+	look, hov := m.chipLookup(), m.hover
+	blocks := renderThread(root, replies, m.nameOf, m.isOnline(), m.st.Me(), inner, sel, func(v *msgView) { v.User, v.Hover = look, hov })
 	// block index for selection: blocks[0]=root, blocks[1]=separator, then replies
 	bsel := -1
 	if sel >= 0 {
@@ -817,6 +949,9 @@ func (m *Model) viewThread(w, h int) string {
 	bodyH := maxInt(1, h-2-1-boxH-1)
 	lines = append(lines, window(blocks, bsel, bodyH, &m.topThr, &m.pinThr)...)
 	lines = append(lines, "")
+	if pop := m.mentionPopup(inner, true); pop != nil {
+		lines = overlayAbove(lines, pop, len(lines), 1, inner)
+	}
 	var boxed []string
 	for _, l := range strings.Split(m.boxView(&m.tinput), "\n") {
 		boxed = append(boxed, bgFill(" "+l, inner-2, inputBg))
@@ -875,6 +1010,33 @@ func (m *Model) overlayView() []string {
 		lines = append(lines, nameSt.Render("Quit Umbrella?"), "",
 			accent.Render("Ctrl+C")+dim.Render(" / ")+accent.Render("y")+dim.Render(" / ")+accent.Render("Enter")+"  quit",
 			dim.Render("any other key  stay"))
+	case overlayClose:
+		r, ok := m.activeRoom()
+		if !ok {
+			return nil
+		}
+		lines = append(lines, nameSt.Render("Close "+truncate(r.Name, 32)+"?"), "",
+			"This deletes the room and all its messages for everyone.", "",
+			accent.Render("y")+dim.Render(" / ")+accent.Render("Enter")+"  close it",
+			dim.Render("any other key  keep it"))
+	case overlayMembers:
+		r, ok := m.activeRoom()
+		if !ok {
+			return nil
+		}
+		lines = append(lines, nameSt.Render(truncate(r.Name, 32))+dim.Render(fmt.Sprintf("  %d members · press any key", len(r.Members))), "")
+		on := m.isOnline()
+		for _, u := range r.Members {
+			dot := dim.Render("○")
+			if on(u) {
+				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
+			}
+			row := dot + " " + nameStyle(u).Render(m.nameOf(u)) + " " + dim.Render("@"+u)
+			if u == r.Owner {
+				row += " " + accent.Render("owner")
+			}
+			lines = append(lines, row)
+		}
 	case overlayHelp:
 		lines = append(lines, nameSt.Render("Shortcuts")+dim.Render("  press any key to close"), "")
 		for _, e := range helpEntries {
@@ -965,7 +1127,11 @@ func (m *Model) View() string {
 	}
 	lines = lines[:m.h]
 	m.screen = m.screen[:0]
-	if dx := m.buzz.shake(time.Now()); dx != 0 {
+	dx := m.buzz.shake(time.Now())
+	if dx == 0 { // a buzz wins over the gentler mention nudge
+		dx = m.nudge.shake(time.Now())
+	}
+	if dx != 0 {
 		lines = shiftLines(lines, dx, m.w)
 	}
 	for i, l := range lines {

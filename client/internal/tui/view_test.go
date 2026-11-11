@@ -1355,7 +1355,7 @@ func TestSelectModeTogglesMouseCapture(t *testing.T) {
 		t.Fatal("click acted in select mode")
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
-	if cmd == nil || fmt.Sprintf("%T", cmd()) != fmt.Sprintf("%T", tea.EnableMouseCellMotion()) || m.selectMode {
+	if cmd == nil || fmt.Sprintf("%T", cmd()) != fmt.Sprintf("%T", tea.EnableMouseAllMotion()) || m.selectMode {
 		t.Fatal("leave select mode")
 	}
 	m.Update(click(z.StartX+1, z.StartY))

@@ -22,6 +22,26 @@ type cursorOut struct {
 	row, col int  // 1-based screen position of the cursor
 	want     bool // whether the real cursor should be visible at row/col
 	shown    bool // what we last told the terminal
+	pointer  bool // the mouse pointer is currently the "hand" shape
+}
+
+// setPointer switches the mouse pointer between the normal arrow and a hand (OSC 22). Terminals
+// that don't implement it ignore the sequence. It is written at once: hovering changes no frame.
+func (c *cursorOut) setPointer(hand bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if hand == c.pointer {
+		return
+	}
+	c.pointer = hand
+	shape := "default"
+	if hand {
+		shape = "pointer"
+	}
+	_, _ = c.File.WriteString("\x1b]22;" + shape + "\x1b\\")
 }
 
 func (c *cursorOut) set(row, col int, want bool) {
@@ -63,6 +83,10 @@ func (c *cursorOut) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	_, _ = c.File.WriteString("\x1b[0 q")
+	if c.pointer {
+		c.pointer = false
+		_, _ = c.File.WriteString("\x1b]22;default\x1b\\")
+	}
 }
 
 // cursorCell finds the cell of the textarea's virtual cursor (the reverse-video

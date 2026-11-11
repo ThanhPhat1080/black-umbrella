@@ -126,7 +126,7 @@ terminal itself: in iTerm2 map them under Settings → Profiles → Keys → Key
 
 Text selection: while the app has the mouse, most terminals still let you bypass it by holding Shift (Windows Terminal, GNOME Terminal, Konsole) or Option ⌥ (iTerm2) while dragging; or use Ctrl+X select mode above.
 
-Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/buzz` shake everyone's screen, `/dance` a surprise animal dances for everyone, `/cow [text]` send an ASCII cow, `/update` install the latest version, `/e` hide/show the sidebar pet, `/quit`.
+Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/buzz` shake everyone's screen, `/dance` a surprise animal dances for everyone, `/room <name> [@user …]` create a private room, then `/invite @user`, `/members`, `/leave` (owner: `/roomname`, `/kick @user`, `/closeroom`), `/cow [text]` send an ASCII cow, `/update` install the latest version, `/e` hide/show the sidebar pet, `/quit`.
 Mouse: click conversations, avatars, `[+]`, and the `[📋]` `[⚓]` `[💬]` buttons on messages.
 
 ## Tests

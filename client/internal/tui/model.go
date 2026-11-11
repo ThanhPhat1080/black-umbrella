@@ -45,6 +45,8 @@ const (
 	overlayProfile
 	overlayHelp
 	overlayQuit // "quit?" confirmation after Ctrl+C
+	overlayMembers
+	overlayClose // "close this room?" confirmation
 )
 
 const (
@@ -114,9 +116,16 @@ type Model struct {
 	reconnecting bool
 	lastTyping   time.Time
 	buzz         buzzState
+	nudge        nudgeState // gentle shake when someone mentions you
 	dance        danceState
 	petOff       bool // /e hides the sidebar pet
 	refN         int
+	roomRefs     map[string]bool // refs of room commands awaiting a reply
+	hover        string          // id of the clickable zone under the mouse ("" = none)
+	sideWidth    int             // sidebar width; 0 = default (dragged with the mouse)
+	resizing     bool            // the sidebar edge is being dragged
+	mentSel      int             // highlighted row of the @-mention popup
+	mentOffAt    int             // 1 + rune index of an "@" whose popup Esc closed (0: none)
 	pending      map[string]*pendingSend
 	retry        []*pendingSend
 	curOut       *cursorOut // real-cursor placement for input methods (nil in tests)
@@ -128,7 +137,7 @@ func Run(ctx context.Context, conn *api.Conn, st *chat.State, kp e2e.KeyPair, re
 	defer zone.Close()
 	m := NewModel(ctx, conn, st, kp, reconnect)
 	m.curOut = &cursorOut{File: os.Stdout}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithOutput(m.curOut))
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithContext(ctx), tea.WithOutput(m.curOut))
 	_, err := p.Run()
 	m.curOut.reset()
 	m.conn.Close()
@@ -161,7 +170,7 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	tb.Cursor.SetMode(cursor.CursorStatic)
 	tb.Blur()
 	return &Model{tinput: tb, ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
-		selMain: -1, selThread: -1, pinMain: true, pinThr: true, pending: map[string]*pendingSend{}, w: 0, h: 0}
+		selMain: -1, selThread: -1, pinMain: true, pinThr: true, pending: map[string]*pendingSend{}, roomRefs: map[string]bool{}, w: 0, h: 0}
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -243,8 +252,50 @@ func (m *Model) setStatus(s string) {
 	m.statusUntil = time.Now().Add(6 * time.Second)
 }
 
+const (
+	defaultSideW = 24
+	minSideW     = 16
+	maxSideW     = 50
+)
+
+// clampSideW keeps the sidebar between its limits and leaves the chat at least 40 cells.
+func (m *Model) clampSideW(w int) int {
+	return clampInt(w, minSideW, maxInt(minSideW, minInt(maxSideW, m.w-40)))
+}
+
+// resizeMouse lets the user drag the sidebar's right edge. It reports whether it used the event.
+func (m *Model) resizeMouse(msg tea.MouseMsg) bool {
+	if msg.Button != tea.MouseButtonLeft && !m.resizing {
+		return false
+	}
+	side, _, _ := m.layout()
+	switch msg.Action {
+	case tea.MouseActionPress:
+		// the border column and the one beside it are the handle
+		if side > 0 && (msg.X == side-1 || msg.X == side) && msg.Y >= 0 && msg.Y < m.h-1 {
+			m.resizing = true
+			return true
+		}
+	case tea.MouseActionMotion:
+		if m.resizing {
+			m.sideWidth = m.clampSideW(msg.X + 1)
+			m.resize()
+			return true
+		}
+	case tea.MouseActionRelease:
+		if m.resizing {
+			m.resizing = false
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) layout() (sideW, chatW, threadW int) {
-	sideW = 24
+	sideW = m.clampSideW(m.sideWidth)
+	if m.sideWidth == 0 {
+		sideW = defaultSideW
+	}
 	if m.w < 70 {
 		sideW = 0
 	}
@@ -281,7 +332,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tick()
 	case buzzTickMsg:
-		return m, tea.Batch(m.buzz.next(time.Now()), m.dance.next(time.Now()))
+		return m, tea.Batch(m.buzz.next(time.Now()), m.dance.next(time.Now()), m.nudge.next(time.Now()))
 	case eventMsg:
 		if msg.conn != m.conn {
 			return m, nil
@@ -367,10 +418,17 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	var cmds []tea.Cmd
 	mainID, thrID := m.selIDs()
 	defer m.reselect(mainID, thrID)
+	prev := m.st.Active()
 	fx := m.st.Apply(ev)
+	if a := m.st.Active(); a != prev { // the open room vanished (kicked, closed, left)
+		m.switchConv(a)
+	}
 	if fx.Bell {
 		// BEL is zero-width and written in one write(2), so it cannot corrupt a frame.
 		cmds = append(cmds, func() tea.Msg { _, _ = os.Stdout.WriteString("\a"); return nil })
+	}
+	if fx.Bell { // Bell is only ever set by a mention of me
+		cmds = append(cmds, m.nudge.begin(time.Now()))
 	}
 	if fx.Buzz && ev.Message != nil && ev.Message.Conv == m.st.Active() {
 		cmds = append(cmds, m.buzz.begin(ev.Message.ID, time.Now()))
@@ -381,6 +439,8 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	switch ev.T {
 	case "hello", "user":
 		m.flushRetries()
+	case "room", "room_gone":
+		m.onRoomEvent(ev, fx)
 	case "error":
 		p := m.pending[ev.Ref]
 		delete(m.pending, ev.Ref)
@@ -395,7 +455,12 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 			}
 			break
 		}
-		m.setStatus(errorText(ev.Error))
+		if m.roomRefs[ev.Ref] {
+			delete(m.roomRefs, ev.Ref)
+			m.setStatus(roomErrorText(ev.Error, ev.Detail))
+		} else {
+			m.setStatus(errorText(ev.Error))
+		}
 		if p != nil {
 			m.restore(p.text, p.fromThread) // never lose what the user wrote
 		}
@@ -599,7 +664,9 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.overlay {
 	case overlayPicker:
 		return m.pickerKey(s)
-	case overlayProfile, overlayHelp:
+	case overlayClose:
+		return m.closeKey(s)
+	case overlayProfile, overlayHelp, overlayMembers:
 		m.overlay = overlayNone
 		return m, nil
 	}
@@ -622,13 +689,16 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.drag.shown = false
+	if handled, cmd := m.mentionKey(k); handled {
+		return m, cmd
+	}
 	switch s {
 	case keySelect:
 		m.selectMode = !m.selectMode
 		if m.selectMode {
 			return m, tea.DisableMouse
 		}
-		return m, tea.EnableMouseCellMotion
+		return m, tea.EnableMouseAllMotion
 	case keyNextConv:
 		m.cycleConv(1)
 		return m, nil
@@ -683,7 +753,9 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	before := b.Value()
 	*b, cmd = b.Update(k)
+	m.mentionTyped(before)
 	if v := b.Value(); v != "" && !strings.HasPrefix(v, "/") && time.Since(m.lastTyping) >= typingEvery {
 		m.lastTyping = time.Now()
 		_ = m.conn.Send(proto.NewTyping(m.st.Active()))
@@ -888,6 +960,9 @@ func (m *Model) sendHere(text string) bool {
 func (m *Model) command(text string) tea.Cmd {
 	fields := strings.Fields(text)
 	arg := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
+	if ok, c := m.roomCommand(fields[0], arg); ok {
+		return c
+	}
 	switch fields[0] {
 	case "/quit", "/q":
 		return tea.Quit
@@ -1003,6 +1078,13 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.selectMode {
 		return m, nil
 	}
+	if msg.Action == tea.MouseActionMotion && msg.Button == tea.MouseButtonNone {
+		m.hoverAt(msg) // plain pointer movement: only the hover feedback changes
+		return m, nil
+	}
+	if m.overlay == overlayNone && m.resizeMouse(msg) {
+		return m, nil
+	}
 	if m.overlay == overlayNone && m.dragMouse(msg) {
 		return m, nil
 	}
@@ -1052,15 +1134,8 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, false
 		return m, nil
 	}
-	for _, e := range m.st.Sidebar() {
-		if e.Username != "" && zone.Get("avs:"+e.Username).InBounds(msg) {
-			m.showProfile(e.Username)
-			return m, nil
-		}
-		if zone.Get("side:" + e.Conv).InBounds(msg) {
-			m.switchConv(e.Conv)
-			return m, nil
-		}
+	if m.clickUser(msg) {
+		return m, nil
 	}
 	var visible []chat.Msg
 	visible = append(visible, m.st.Timeline(m.st.Active())...)
@@ -1076,9 +1151,6 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch {
-		case zone.Get("av:" + v.ID).InBounds(msg):
-			m.showProfile(v.Sender)
-			return m, nil
 		case zone.Get("copy:" + v.ID).InBounds(msg):
 			m.copyLink(v)
 			return m, nil

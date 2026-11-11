@@ -12,6 +12,10 @@ const STATEMENTS = [
     created_at INTEGER NOT NULL, kept INTEGER NOT NULL DEFAULT 0, nonce TEXT NOT NULL, ct TEXT NOT NULL, sender_key TEXT)`,
   `CREATE TABLE IF NOT EXISTS message_keys(
     message_id TEXT NOT NULL, username TEXT NOT NULL, wrapped TEXT NOT NULL, PRIMARY KEY(message_id, username))`,
+  `CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS room_members(
+    room_id TEXT NOT NULL, username TEXT NOT NULL, joined_at INTEGER NOT NULL, PRIMARY KEY(room_id, username))`,
+  `CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(username)`,
   `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conv)`,
   `CREATE INDEX IF NOT EXISTS idx_messages_kept ON messages(kept, created_at)`,
 ];

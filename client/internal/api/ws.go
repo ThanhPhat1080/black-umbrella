@@ -46,7 +46,7 @@ func Dial(ctx context.Context, baseURL, token string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	ws, _, err := websocket.Dial(ctx, u, nil)
+	ws, _, err := websocket.Dial(ctx, u+"&rooms=1", nil) // rooms=1: this client understands rooms
 	if err != nil {
 		return nil, err
 	}

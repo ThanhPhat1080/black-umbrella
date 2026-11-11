@@ -218,6 +218,11 @@ Khi đang ở danh sách tin, cứ gõ chữ bình thường — app tự đưa 
 | `/i` | mở bảng chọn kaomoji |
 | `/whois @username` | xem profile của một người |
 | `/dance` | một con vật bất ngờ nhảy múa cho mọi người xem |
+| `/room <tên> [@user …]` | tạo room riêng, thêm luôn những người bạn liệt kê |
+| `/invite @user` | thêm người vào room đang mở (thành viên nào cũng thêm được) |
+| `/members` | xem ai đang trong room |
+| `/leave` | rời room đang mở |
+| `/roomname <tên>`, `/kick @user`, `/closeroom` | chỉ chủ room: đổi tên, đuổi người, xoá room cho mọi người |
 | `/cow [chữ]` | gửi hình con bò ASCII (nói câu bạn gõ) |
 | `/e` | ẩn / hiện con mèo ở sidebar |
 | `/name Tên mới` | đổi display name của bạn |

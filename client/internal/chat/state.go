@@ -30,11 +30,16 @@ type Msg struct {
 	Replies                          int
 }
 
-type Effects struct{ Bell, Buzz, Dance bool }
+type Effects struct {
+	Bell, Buzz, Dance bool
+	Status            string // a line worth showing the user (e.g. "Bob added you to Dev")
+	Gone              string // a room conversation that just disappeared
+}
 
 type Entry struct {
 	Conv, Label, Username string
 	Online                bool
+	Room                  bool
 	Unread                int
 }
 
@@ -49,6 +54,10 @@ type State struct {
 	typing map[string]map[string]time.Time // conv -> user -> when
 	active string
 
+	rooms     map[string]proto.Room
+	roomOrder []string
+	notices   map[string]notice
+
 	newest   time.Time
 	hadHello bool
 }
@@ -58,6 +67,7 @@ func New(me string, kp e2e.KeyPair) *State {
 		Now: time.Now, me: me, kp: kp,
 		users: map[string]proto.User{}, msgs: map[string]*Msg{},
 		unread: map[string]int{}, typing: map[string]map[string]time.Time{}, active: "hell",
+		rooms: map[string]proto.Room{}, notices: map[string]notice{},
 	}
 }
 
@@ -142,6 +152,22 @@ func (s *State) Apply(ev proto.Event) Effects {
 			}
 		}
 		s.hadHello = true
+		s.rooms, s.roomOrder = map[string]proto.Room{}, nil
+		for _, r := range ev.Rooms {
+			s.putRoom(r)
+		}
+		if _, ok := s.rooms[s.active]; strings.HasPrefix(s.active, "room:") && !ok {
+			s.active = "hell"
+		}
+	case "room":
+		if ev.Room != nil {
+			r := s.putRoom(*ev.Room)
+			if ev.Note != nil {
+				s.noteRoom(r, *ev.Note, &fx)
+			}
+		}
+	case "room_gone":
+		s.dropRoom(ev, &fx)
 	case "msg":
 		if ev.Message == nil {
 			break
@@ -190,7 +216,7 @@ func (s *State) Apply(ev proto.Event) Effects {
 
 // noteIncoming does the unread / mention bookkeeping for a message from someone else.
 func (s *State) noteIncoming(m *Msg, fx *Effects) {
-	if m.Conv == "hell" && !m.Undecryptable && Mentions(m.Text, s.me) {
+	if (m.Conv == "hell" || strings.HasPrefix(m.Conv, "room:")) && !m.Undecryptable && Mentions(m.Text, s.me) {
 		fx.Bell = true
 	}
 	if m.Conv != s.active {
@@ -282,6 +308,9 @@ func (s *State) Sidebar() []Entry {
 		}
 		return us[i].Username < us[j].Username
 	})
+	for _, id := range s.roomOrder {
+		out = append(out, Entry{Conv: id, Label: s.rooms[id].Name, Room: true, Unread: s.unread[id]})
+	}
 	for _, u := range us {
 		c := DMConv(s.me, u.Username)
 		label := u.DisplayName
@@ -310,6 +339,16 @@ func (s *State) Recipients(conv string) map[string][32]byte {
 			}
 		}
 		out[s.me] = s.kp.Public
+		return out
+	}
+	if r, ok := s.rooms[conv]; ok {
+		for _, name := range r.Members {
+			if u, ok := s.users[name]; ok && name != s.me {
+				if k, ok := pubKey(u); ok {
+					out[name] = k
+				}
+			}
+		}
 		return out
 	}
 	if strings.HasPrefix(conv, "dm:") {
@@ -371,4 +410,142 @@ func Preformatted(text string) (string, bool) {
 		return text[4 : len(text)-4], true
 	}
 	return "", false
+}
+
+type notice struct {
+	text string
+	at   time.Time
+}
+
+const noticeTTL = 30 * time.Second
+
+func cleanRoom(r proto.Room) proto.Room {
+	r.Name = SanitizeLine(r.Name)
+	r.Owner = SanitizeLine(r.Owner)
+	ms := make([]string, len(r.Members))
+	for i, m := range r.Members {
+		ms[i] = SanitizeLine(m)
+	}
+	r.Members = ms
+	return r
+}
+
+// putRoom inserts or updates a room, keeping the order rooms were first seen in.
+func (s *State) putRoom(r proto.Room) proto.Room {
+	r = cleanRoom(r)
+	if _, ok := s.rooms[r.ID]; !ok {
+		s.roomOrder = append(s.roomOrder, r.ID)
+	}
+	s.rooms[r.ID] = r
+	return r
+}
+
+// RoomOf returns the room behind a conversation id.
+func (s *State) RoomOf(conv string) (proto.Room, bool) {
+	r, ok := s.rooms[conv]
+	return r, ok
+}
+
+// Notice is the latest short-lived room notice (who joined, left, ...) if it is still fresh.
+func (s *State) Notice(conv string, now time.Time) string {
+	n, ok := s.notices[conv]
+	if !ok || now.Sub(n.at) > noticeTTL {
+		return ""
+	}
+	return n.text
+}
+
+func (s *State) who(u string) string {
+	if u == s.me {
+		return "You"
+	}
+	return s.DisplayName(u)
+}
+
+func (s *State) names(us []string) string {
+	var n []string
+	for _, u := range us {
+		if u == s.me {
+			n = append(n, "you")
+		} else {
+			n = append(n, s.DisplayName(u))
+		}
+	}
+	return strings.Join(n, ", ")
+}
+
+func has(l []string, v string) bool {
+	for _, x := range l {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) noteRoom(r proto.Room, n proto.Note, fx *Effects) {
+	by := s.who(n.By)
+	var text string
+	switch n.Kind {
+	case "created":
+		text = by + " created the room"
+		if n.By != s.me {
+			fx.Status = s.DisplayName(n.By) + " added you to " + r.Name
+		}
+	case "added":
+		text = by + " added " + s.names(n.Users)
+		if has(n.Users, s.me) && n.By != s.me {
+			fx.Status = s.DisplayName(n.By) + " added you to " + r.Name
+		}
+	case "left":
+		text = by + " left"
+		if n.NewOwner != "" {
+			text += ". " + s.who(n.NewOwner) + " " + map[bool]string{true: "are", false: "is"}[n.NewOwner == s.me] + " the owner now"
+		}
+	case "kicked":
+		text = by + " removed " + s.names(n.Users)
+	case "renamed":
+		text = by + " renamed the room to " + SanitizeLine(n.Name)
+	default:
+		return
+	}
+	s.notices[r.ID] = notice{SanitizeLine(text), s.Now()}
+}
+
+func (s *State) dropRoom(ev proto.Event, fx *Effects) {
+	r, ok := s.rooms[ev.ID]
+	if !ok {
+		return
+	}
+	delete(s.rooms, ev.ID)
+	for i, id := range s.roomOrder {
+		if id == ev.ID {
+			s.roomOrder = append(s.roomOrder[:i], s.roomOrder[i+1:]...)
+			break
+		}
+	}
+	for id, m := range s.msgs {
+		if m.Conv == ev.ID {
+			delete(s.msgs, id)
+		}
+	}
+	delete(s.unread, ev.ID)
+	delete(s.notices, ev.ID)
+	delete(s.typing, ev.ID)
+	if s.active == ev.ID {
+		s.active = "hell"
+	}
+	fx.Gone = ev.ID
+	switch ev.Reason {
+	case "kicked":
+		fx.Status = s.DisplayName(ev.By) + " removed you from " + r.Name
+	case "closed":
+		if ev.By == s.me {
+			fx.Status = "Closed " + r.Name + "."
+		} else {
+			fx.Status = r.Name + " was closed by " + s.DisplayName(ev.By)
+		}
+	default:
+		fx.Status = "You left " + r.Name + "."
+	}
 }

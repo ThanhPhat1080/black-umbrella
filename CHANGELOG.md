@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.3.0 — 2026-11-11
+- Client: `@mentions` of known users show as a presence dot plus the name in that user's colour (`● @bob`). Click a mention, a name in a message header or a name in the room's member list to open the chat with that person. The mouse pointer turns into a hand over clickable names (terminals that support OSC 22: kitty, WezTerm, foot, Ghostty, xterm) and the item under the mouse is highlighted everywhere.
+- Client: drag the sidebar's right edge with the mouse to make it narrower or wider (16-50 columns).
+- Client: being `@mentioned` (in Hell or a room) now also nudges your window: a gentle half-second wiggle, much softer than `/buzz`.
+- Client: typing `@` opens a list of people to mention (everyone in Hell, the members in a room, the other person in a DM). Up/Down to choose, Tab or Enter to insert, Esc to close it; deleting the `@` closes it too.
+- Rooms: private group chats. `/room <name> [@user …]` creates one (people you list are added straight away), `/invite @user`, `/members`, `/leave`; the owner can `/roomname`, `/kick @user` and `/closeroom` (deletes everything). Up to 20 people per room and 10 rooms per person. Only members can see a room exists; messages are end-to-end encrypted for the current members, so newcomers don't see earlier messages and people who leave or are kicked lose them. Needs the new client: older versions don't see rooms (type `/update`).
+
 ## v1.2.0 — 2026-11-11
 - Client: `/update` (or `umbrella update`) installs the latest release in place, with a SHA-256 check. Your key is untouched; reopen Umbrella afterwards. Versions before v1.2.0 have no updater, so download this one manually once.
 

@@ -95,3 +95,12 @@ Admin is a CLI (`umbrella admin …`) authenticating with `ADMIN_TOKEN` (Worker 
 
 `umbrella` → if no key file: prompt to `umbrella register`. Otherwise ask PIN once:
 decrypt key file (wrong PIN fails locally first) → `POST /api/login` → open WebSocket.
+
+## 7. Rooms (private groups)
+
+- Conversation id `room:<12 hex>`; the server keeps `rooms(id, name, owner, created_at)` and `room_members(room_id, username, joined_at)`. Names are 1-32 characters (letters incl. Vietnamese, digits, spaces and `! @ # $ % ^ & * ( ) _ - + = ~ \``), not unique.
+- Anyone creates a room (`room_create`, optionally with members); any member invites (`room_invite`); invitees join at once. Owner: `room_kick`, `room_name`, `room_close`. Anyone: `room_leave`. Owner leaving passes ownership to the earliest joiner; the last person leaving deletes the room.
+- Limits: 20 members per room, 10 rooms per person. Errors carry a code and an optional `detail` (a username).
+- Privacy: non-members get `not_found` / `bad_conv` for every room operation, identical to a missing room. Names and member lists are visible to the server; message bodies stay end-to-end encrypted for the current members (keys wrapped per message as in Hell). Leaving or being kicked deletes that user's wrapped keys for the room's history.
+- Events `room` (full room state plus a `note` saying what changed) and `room_gone` (`reason` left | kicked | closed) go only to sockets that connected with `?rooms=1`; older clients never see rooms or their messages.
+- Client: "Rooms" section in the sidebar; commands `/room`, `/invite`, `/members`, `/leave`, `/roomname`, `/kick`, `/closeroom` (asks to confirm). Join/leave/kick notices are shown for 30 s above the textbox and are not stored.

@@ -292,3 +292,70 @@ func TestFlow(t *testing.T) {
 		t.Fatalf("old reply after bob re-keyed: %+v", replies)
 	}
 }
+
+func isRoom(kind string) func(proto.Event) bool {
+	return func(ev proto.Event) bool { return ev.T == "room" && ev.Note != nil && ev.Note.Kind == kind }
+}
+
+func TestRooms(t *testing.T) {
+	e := setup(t)
+	alice, atok := e.register("alice")
+	bob, btok := e.register("bob")
+	carol, ctok := e.register("carol")
+	e.dial(alice, atok)
+	e.dial(bob, btok)
+	e.dial(carol, ctok)
+
+	if err := alice.conn.Send(proto.NewRoomCreate("rc", "Phòng kín #1", []string{bob.name})); err != nil {
+		t.Fatal(err)
+	}
+	ev := e.expect(alice, isRoom("created"))
+	id := ev.Room.ID
+	e.expect(bob, isRoom("created"))
+	if ev.Room.Name != "Phòng kín #1" || ev.Room.Owner != alice.name {
+		t.Fatalf("room %+v", ev.Room)
+	}
+	// carol is outside: no event, and every operation looks like a missing room
+	e.nothing(carol, 500*time.Millisecond, func(ev proto.Event) bool { return ev.T == "room" || ev.T == "msg" })
+	if _, ok := carol.st.RoomOf(id); ok {
+		t.Fatal("carol must not know the room")
+	}
+	_ = carol.conn.Send(proto.NewRoomInvite("x", id, []string{carol.name}))
+	if ev := e.expect(carol, func(ev proto.Event) bool { return ev.T == "error" }); ev.Error != "not_found" {
+		t.Fatalf("outsider got %q", ev.Error)
+	}
+
+	// encrypted messages reach members only
+	e.say(alice, id, "", "bí mật")
+	e.expect(bob, isMsg("bí mật", bob))
+	e.nothing(carol, 500*time.Millisecond, func(ev proto.Event) bool { return ev.T == "msg" })
+
+	// bob invites carol; she joins but cannot read what came before
+	_ = bob.conn.Send(proto.NewRoomInvite("i", id, []string{carol.name}))
+	e.expect(carol, isRoom("added"))
+	e.expect(alice, isRoom("added"))
+	e.expect(bob, isRoom("added")) // bob must learn the new member list before sealing for it
+	e.say(bob, id, "", "chào carol")
+	e.expect(carol, isMsg("chào carol", carol))
+	if n := len(carol.st.Timeline(id)); n != 1 {
+		t.Fatalf("carol sees %d messages, want 1", n)
+	}
+
+	// only the owner kicks; the kicked user loses the room and its history
+	_ = bob.conn.Send(proto.NewRoomKick("k", id, carol.name))
+	if ev := e.expect(bob, func(ev proto.Event) bool { return ev.T == "error" }); ev.Error != "not_owner" {
+		t.Fatalf("got %q", ev.Error)
+	}
+	_ = alice.conn.Send(proto.NewRoomKick("k", id, carol.name))
+	e.expect(carol, func(ev proto.Event) bool { return ev.T == "room_gone" && ev.Reason == "kicked" })
+	if _, ok := carol.st.RoomOf(id); ok || len(carol.st.Timeline(id)) != 0 {
+		t.Fatal("kicked user keeps the room")
+	}
+
+	// closing deletes it for everyone
+	_ = alice.conn.Send(proto.NewRoomClose("c", id))
+	e.expect(bob, func(ev proto.Event) bool { return ev.T == "room_gone" && ev.Reason == "closed" })
+	if _, ok := bob.st.RoomOf(id); ok {
+		t.Fatal("room should be gone")
+	}
+}

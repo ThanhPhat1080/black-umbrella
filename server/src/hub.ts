@@ -24,9 +24,10 @@ export class HubDO extends DurableObject<Env> {
     };
     ctx.blockConcurrencyWhile(async () => migrate(sql));
     const out: Outbox = {
-      send: (username, msg) => {
+      send: (username, msg, opts) => {
         const data = JSON.stringify(msg);
         for (const ws of ctx.getWebSockets(username)) {
+          if (opts?.rooms && !ctx.getTags(ws).includes("rooms")) continue;
           try {
             ws.send(data);
           } catch {
@@ -66,9 +67,10 @@ export class HubDO extends DurableObject<Env> {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return json(426, { error: "upgrade_required" });
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    this.ctx.acceptWebSocket(server, [username]);
+    const rooms = url.searchParams.get("rooms") === "1";
+    this.ctx.acceptWebSocket(server, rooms ? [username, "rooms"] : [username]);
     const first = this.ctx.getWebSockets(username).length === 1;
-    server.send(JSON.stringify(this.core.hello(username)));
+    server.send(JSON.stringify(this.core.hello(username, rooms)));
     this.core.onConnect(username, first);
     return new Response(null, { status: 101, webSocket: client });
   }

@@ -27,10 +27,23 @@ export function dmConv(a: string, b: string): string {
   return a < b ? `dm:${a}|${b}` : `dm:${b}|${a}`;
 }
 
-export type Conv = { kind: "hell" } | { kind: "dm"; a: string; b: string };
+const ROOM_NAME = /^[\p{L}\p{M}\p{N} !@#$%^&*()_\-+=~`]+$/u;
+
+/** Trimmed room name, or null when it is not 1-32 characters of letters, digits, spaces and ! @ # $ % ^ & * ( ) _ - + = ~ ` */
+export function validRoomName(s: unknown): string | null {
+  if (typeof s !== "string") return null;
+  const t = s.trim();
+  const n = [...t].length;
+  return n >= 1 && n <= 32 && ROOM_NAME.test(t) ? t : null;
+}
+
+export const ROOM_ID = /^room:[0-9a-f]{12}$/;
+
+export type Conv = { kind: "hell" } | { kind: "dm"; a: string; b: string } | { kind: "room"; id: string };
 
 export function parseConv(conv: unknown): Conv | null {
   if (conv === "hell") return { kind: "hell" };
+  if (typeof conv === "string" && ROOM_ID.test(conv)) return { kind: "room", id: conv };
   if (typeof conv !== "string" || !conv.startsWith("dm:")) return null;
   const parts = conv.slice(3).split("|");
   if (parts.length !== 2) return null;
