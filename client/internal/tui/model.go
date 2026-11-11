@@ -25,6 +25,7 @@ import (
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/kaomoji"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/links"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/proto"
+	"github.com/ThanhPhat1080/black-umbrella/client/internal/update"
 )
 
 type pane int
@@ -219,6 +220,24 @@ func (m *Model) doReconnect() tea.Cmd {
 	}
 }
 
+// Version is the running build's version, set by main; used by /update.
+var Version = "dev"
+
+type updateMsg struct {
+	tag     string
+	updated bool
+	err     error
+}
+
+func doUpdate() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		tag, done, err := update.Run(ctx, Version)
+		return updateMsg{tag, done, err}
+	}
+}
+
 func (m *Model) setStatus(s string) {
 	m.status = chat.SanitizeLine(s)
 	m.statusUntil = time.Now().Add(6 * time.Second)
@@ -287,6 +306,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending = map[string]*pendingSend{}
 		m.setStatus("Reconnected.")
 		return m, waitEvent(m.conn)
+	case updateMsg:
+		switch {
+		case msg.err != nil:
+			m.setStatus("Update failed: " + msg.err.Error())
+		case msg.updated:
+			m.setStatus("Updated to " + msg.tag + ". Quit (/q) and reopen to use it.")
+		default:
+			m.setStatus("Already up to date (" + msg.tag + ").")
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.onKey(msg)
 	case tea.MouseMsg:
@@ -862,6 +891,10 @@ func (m *Model) command(text string) tea.Cmd {
 	switch fields[0] {
 	case "/quit", "/q":
 		return tea.Quit
+	case "/update":
+		m.box().Reset()
+		m.setStatus("Checking for updates…")
+		return doUpdate()
 	case "/buzz":
 		if wait := buzzCooldown - time.Since(m.buzz.sent); wait > 0 {
 			m.setStatus(fmt.Sprintf("Easy! You can buzz again in %ds.", int(wait.Seconds())+1))

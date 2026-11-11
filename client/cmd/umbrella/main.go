@@ -22,15 +22,20 @@ import (
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/e2e"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/store"
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/tui"
+	"github.com/ThanhPhat1080/black-umbrella/client/internal/update"
 )
 
 // DefaultServer is the production server; override at build time with -ldflags "-X main.DefaultServer=…" or at runtime with --server.
 var DefaultServer = "https://umbrella.black-umbrella.workers.dev"
 
+// Version is stamped at build time with -ldflags "-X main.Version=vX.Y.Z".
+var Version = "dev"
+
 const usage = `Umbrella - end-to-end encrypted terminal chat
 
 Usage:
   umbrella [--server URL]                       open the chat
+  umbrella update                               install the latest release (also /update in the chat)
   umbrella register [--force] [--server URL]    create your account (needs an invite code)
   umbrella export-key <file>                    back up your encrypted key file
   umbrella admin invite [--server URL]          create an invite code
@@ -115,6 +120,10 @@ func keyPath() string {
 }
 
 func main() {
+	tui.Version = Version
+	if exe, err := os.Executable(); err == nil {
+		_ = os.Remove(exe + ".old") // leftover from a Windows self-update
+	}
 	o, err := parseArgs(os.Args[1:])
 	if err != nil {
 		fail("%v\n\n%s", err, usage)
@@ -131,6 +140,18 @@ func main() {
 	switch cmd {
 	case "":
 		runChat(p, o.server)
+	case "update":
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		tag, done, err := update.Run(ctx, Version)
+		if err != nil {
+			fail("Update failed: %v", err)
+		}
+		if done {
+			fmt.Println("Updated to", tag+". Run `umbrella` to chat.")
+		} else {
+			fmt.Println("Already up to date (" + tag + ").")
+		}
 	case "register":
 		runRegister(p, server, o.force)
 	case "export-key":

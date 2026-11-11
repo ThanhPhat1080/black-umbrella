@@ -48,6 +48,7 @@ var helpEntries = [][2]string{
 	{"Mouse drag", "select text and copy it (stays in one pane)"},
 	{"Ctrl+X", "select mode: let the terminal select"},
 	{"", ""},
+	{"/update", "install the latest version"},
 	{"/buzz", "shake everyone's screen"},
 	{"/dance", "a surprise animal dances for everyone"},
 	{"/cow [text]", "send an ASCII cow (saying text)"},

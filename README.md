@@ -33,7 +33,12 @@ Local development: `cp .dev.vars.example .dev.vars && npx wrangler dev --port 87
 Download the binary for your machine from the [latest release](https://github.com/ThanhPhat1080/black-umbrella/releases/latest)
 (`umbrella-darwin-{arm64,amd64}`, `umbrella-linux-{amd64,arm64}`, `umbrella-windows-amd64.exe`).
 Your key lives in `~/.umbrella/` (`%APPDATA%\umbrella\` on Windows), so updating only replaces the
-program and never requires registering again. Quit Umbrella before updating.
+program and never requires registering again.
+
+From v1.2.0 on, just type `/update` in the chat (or run `umbrella update`). It downloads the latest release,
+checks its SHA-256, and replaces the program in place; reopen Umbrella afterwards. If it can't write to the install
+folder (e.g. `/usr/local/bin`), run `sudo umbrella update`. Versions before v1.2.0 have no updater, so download
+once manually as below.
 
 macOS (use `amd64` on Intel Macs; the same commands install it the first time):
 
@@ -121,7 +126,7 @@ terminal itself: in iTerm2 map them under Settings → Profiles → Keys → Key
 
 Text selection: while the app has the mouse, most terminals still let you bypass it by holding Shift (Windows Terminal, GNOME Terminal, Konsole) or Option ⌥ (iTerm2) while dragging; or use Ctrl+X select mode above.
 
-Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/buzz` shake everyone's screen, `/dance` a surprise animal dances for everyone, `/cow [text]` send an ASCII cow, `/e` hide/show the sidebar pet, `/quit`.
+Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/buzz` shake everyone's screen, `/dance` a surprise animal dances for everyone, `/cow [text]` send an ASCII cow, `/update` install the latest version, `/e` hide/show the sidebar pet, `/quit`.
 Mouse: click conversations, avatars, `[+]`, and the `[📋]` `[⚓]` `[💬]` buttons on messages.
 
 ## Tests

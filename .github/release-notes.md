@@ -10,6 +10,8 @@
 | Linux ARM64 | `umbrella-linux-arm64` |
 | Windows | `umbrella-windows-amd64.exe` |
 
+**From v1.2.0:** just type `/update` in the chat (or `umbrella update`).
+
 **Quick update** (your key stays in `~/.umbrella/`, no need to register again; quit Umbrella first):
 - **macOS:** `sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella && sudo chmod +x /usr/local/bin/umbrella && sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella` (use `amd64` on Intel)
 - **Linux:** `sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella`

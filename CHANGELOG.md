@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.0 — 2026-11-11
+- Client: `/update` (or `umbrella update`) installs the latest release in place, with a SHA-256 check. Your key is untouched; reopen Umbrella afterwards. Versions before v1.2.0 have no updater, so download this one manually once.
+
 ## v1.1.0 — 2026-11-11
 - Client: Linux support for input methods (IBus, fcitx): the composition popup now appears at the textbox instead of the bottom-left corner of the terminal.
 - Client: `/cow [text]` sends an ASCII cow in a cowsay-style speech bubble (centred in the chat; no thread/keep buttons). `/dance` makes a surprise animal dance for everyone (10s cooldown); `/e` hides or shows the dancing cat at the bottom of the sidebar.

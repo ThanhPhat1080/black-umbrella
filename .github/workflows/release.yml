@@ -32,8 +32,9 @@ jobs:
       - name: Build binaries
         env:
           GOTOOLCHAIN: local
+          VERSION: ${{ inputs.version || github.ref_name }}
         run: |
-          scripts/build.sh https://umbrella.black-umbrella.workers.dev
+          scripts/build.sh https://umbrella.black-umbrella.workers.dev "$VERSION"
           cd dist && sha256sum umbrella-* > SHA256SUMS.txt
 
       - name: Publish release
