@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.5.0 — 2026-11-11
+- Client: the conversation header shows one row of people; when they do not all fit, a `+N · Show more` button opens a members modal with a scrollable list, an `[X]` button, Esc to close, `↑/↓` to select and Enter or a click to open that person's chat. `/members` now works in every conversation.
+- Client: Tab now also reaches the left sidebar (input → messages → sidebar). There `↑/↓` pick a conversation and `→` or Enter opens it; the focused sidebar gets a heavy border and a tinted background. A long user list now scrolls with the cursor and the mouse wheel.
+
 ## v1.4.1 — 2026-11-11
 - Client: every conversation header (Hell room, private rooms, direct chats) now has the room-style layout: title with member and online counts, the list of people (green dot = online, click a name to chat), and a divider, on a slightly tinted background.
 

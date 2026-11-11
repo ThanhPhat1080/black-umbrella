@@ -1064,6 +1064,10 @@ func TestThreadBoxAndMainBoxRouteSeparately(t *testing.T) {
 	}
 	typeInto(m, "reply text")
 	press(m, tea.KeyEnter)
+	press(m, tea.KeyTab) // thread box -> sidebar
+	if m.pane != paneSide {
+		t.Fatalf("Tab should go to the sidebar, pane=%v", m.pane)
+	}
 	press(m, tea.KeyTab)
 	if m.pane != paneInput {
 		t.Fatalf("Tab should go to the main box, pane=%v", m.pane)
@@ -1083,6 +1087,7 @@ func TestThreadBoxAndMainBoxRouteSeparately(t *testing.T) {
 	typeInto(m, "thread draft")
 	press(m, tea.KeyTab)
 	press(m, tea.KeyTab)
+	press(m, tea.KeyTab)
 	if m.input.Value() != "main draft" || m.tinput.Value() != "thread draft" || m.pane != paneThreadInput {
 		t.Fatalf("drafts: %q %q pane=%v", m.input.Value(), m.tinput.Value(), m.pane)
 	}
@@ -1099,6 +1104,10 @@ func TestTabWithoutThreadKeepsOldBehaviour(t *testing.T) {
 	m, _, _ := newTestModel(t)
 	press(m, tea.KeyTab)
 	if m.pane != paneMain {
+		t.Fatalf("pane=%v", m.pane)
+	}
+	press(m, tea.KeyTab)
+	if m.pane != paneSide {
 		t.Fatalf("pane=%v", m.pane)
 	}
 	press(m, tea.KeyTab)
@@ -1183,6 +1192,7 @@ func TestErrorRestoresIntoTheSendingBox(t *testing.T) {
 	typeInto(m, "thread msg")
 	press(m, tea.KeyEnter)
 	ref := f.sends()[0].Ref
+	press(m, tea.KeyTab)
 	press(m, tea.KeyTab)
 	typeInto(m, "main draft")
 	m.onEvent(proto.Event{T: "error", Ref: ref, Error: "bad_parent"})
@@ -1555,5 +1565,101 @@ func TestCtrlASelectAllOnWindowsLinuxOnly(t *testing.T) {
 		if v := m.input.Value(); v != want {
 			t.Fatalf("on=%v value %q want %q", on, v, want)
 		}
+	}
+}
+
+func TestCrowdedHeaderStaysOneRowWithShowMore(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	var us []proto.User
+	for i := 0; i < 40; i++ {
+		us = append(us, proto.User{Username: fmt.Sprintf("user%02d", i), DisplayName: fmt.Sprintf("Person %02d", i), Online: true})
+	}
+	m.onEvent(proto.Event{T: "hello", Users: us})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.View()
+	rows := 0
+	more := false
+	for _, l := range m.screen {
+		if strings.Contains(l, "[ ● Person 00") {
+			rows++
+		}
+		more = more || strings.Contains(l, "Show more")
+	}
+	if rows != 1 || !more {
+		t.Fatalf("header must be a single row with Show more (rows=%d more=%v):\n%s", rows, more, strings.Join(m.screen, "\n"))
+	}
+	m.overlay = overlayMembers
+	m.View()
+	if !strings.Contains(strings.Join(m.screen, "\n"), "Person 39") && !strings.Contains(strings.Join(m.screen, "\n"), "more") {
+		t.Fatal("members popup is empty")
+	}
+}
+
+func TestMembersModalKeysScrollAndOpenChat(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	var us []proto.User
+	for i := 0; i < 40; i++ {
+		us = append(us, proto.User{Username: fmt.Sprintf("user%02d", i), DisplayName: fmt.Sprintf("Person %02d", i), Online: true})
+	}
+	m.onEvent(proto.Event{T: "hello", Users: us})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.View()
+	m.openMembers()
+	m.View()
+	if !strings.Contains(strings.Join(m.screen, "\n"), "[X]") {
+		t.Fatalf("no [X] button:\n%s", strings.Join(m.screen, "\n"))
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}) // stray keys must not dismiss it
+	if m.overlay != overlayMembers {
+		t.Fatal("a stray key closed the modal")
+	}
+	for i := 0; i < 30; i++ {
+		press(m, tea.KeyDown)
+	}
+	m.View()
+	if m.memTop == 0 {
+		t.Fatal("list did not scroll")
+	}
+	want := m.headerPeople("hell")[m.memIdx]
+	press(m, tea.KeyEnter)
+	if m.overlay != overlayNone || m.st.Active() != chat.DMConv(m.st.Me(), want) {
+		t.Fatalf("Enter did not open the chat with %s (active=%s overlay=%v)", want, m.st.Active(), m.overlay)
+	}
+	m.openMembers()
+	press(m, tea.KeyEsc)
+	if m.overlay != overlayNone {
+		t.Fatal("Esc did not close")
+	}
+}
+
+func TestSidebarFocusSelectsScrollsAndOpensChat(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	var us []proto.User
+	for i := 0; i < 40; i++ {
+		us = append(us, proto.User{Username: fmt.Sprintf("user%02d", i), DisplayName: fmt.Sprintf("Person %02d", i), Online: true})
+	}
+	m.onEvent(proto.Event{T: "hello", Users: us})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	m.View()
+	press(m, tea.KeyTab) // input -> messages
+	press(m, tea.KeyTab) // messages -> sidebar
+	if m.pane != paneSide {
+		t.Fatalf("pane=%v", m.pane)
+	}
+	m.View()
+	if !strings.Contains(m.screen[0], "┏") {
+		t.Fatalf("focused sidebar should have the heavy border: %q", m.screen[0])
+	}
+	for i := 0; i < 25; i++ {
+		press(m, tea.KeyDown)
+	}
+	m.View()
+	if m.sideTop == 0 {
+		t.Fatal("sidebar did not scroll with the cursor")
+	}
+	want := m.st.Sidebar()[m.sideSel].Conv
+	press(m, tea.KeyRight)
+	if m.st.Active() != want || m.pane != paneInput {
+		t.Fatalf("Right should open %s and focus the box (active=%s pane=%v)", want, m.st.Active(), m.pane)
 	}
 }

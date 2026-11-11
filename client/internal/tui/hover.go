@@ -57,6 +57,7 @@ func (m *Model) clickTargets() []clickTarget {
 			add("rm:"+u, func() { m.openDM(u) })
 		}
 	}
+	add("mem:more", m.openMembers)
 	look := m.chipLookup()
 	for _, v := range m.visibleMsgs() {
 		v := v

@@ -38,6 +38,7 @@ const (
 	paneMain
 	paneThread
 	paneThreadInput // the textbox at the bottom of the thread panel
+	paneSide        // the left sidebar: up/down pick a conversation, Right opens it
 )
 
 type overlay int
@@ -103,9 +104,12 @@ type Model struct {
 	pinMain, pinThr bool
 	threadRoot      string
 
-	overlay     overlay
-	pickIdx     int
-	profileUser string
+	overlay          overlay
+	pickIdx          int
+	sideSel, sideTop int // sidebar focus: selected entry and scroll offset (rows)
+	sideSeen         int // the line the sidebar last scrolled to, so wheel scrolling is not undone
+	memIdx, memTop   int // members modal: selected row and scroll offset
+	profileUser      string
 
 	drag         dragSel
 	selAllBox    *textarea.Model // the textbox whose whole text is selected (select all), or nil
@@ -685,12 +689,19 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.overlay = overlayQuit
 		return m, nil
 	}
+	if m.overlay == overlayNone && m.pane == paneSide {
+		if done, cmd := m.sideKey(k); done {
+			return m, cmd
+		}
+	}
 	switch m.overlay {
 	case overlayPicker:
 		return m.pickerKey(s)
 	case overlayClose:
 		return m.closeKey(s)
-	case overlayProfile, overlayHelp, overlayMembers:
+	case overlayMembers:
+		return m.membersKey(s)
+	case overlayProfile, overlayHelp:
 		m.overlay = overlayNone
 		return m, nil
 	}
@@ -846,30 +857,64 @@ func (m *Model) reselect(mainID, thrID string) {
 }
 
 func (m *Model) cycleFocus() {
-	if m.threadRoot != "" { // two textboxes: Tab flips between them
+	switch {
+	case m.pane == paneSide:
+		m.focusInput()
+		return
+	case m.threadRoot != "": // input -> thread box -> sidebar -> input
 		if m.pane == paneInput {
 			m.focusThreadInput()
 		} else {
-			m.focusInput()
+			m.focusSide()
 		}
 		return
-	}
-	next := map[pane]pane{paneInput: paneMain, paneMain: paneInput, paneThread: paneInput}
-	if m.threadRoot != "" {
-		next = map[pane]pane{paneInput: paneMain, paneMain: paneThread, paneThread: paneInput}
-	}
-	m.pane = next[m.pane]
-	if m.pane == paneInput {
-		m.focusInput()
+	case m.pane == paneMain, m.pane == paneThread:
+		m.focusSide()
 		return
 	}
+	m.pane = paneMain // from the textbox: the message list
 	m.input.Blur()
-	if m.pane == paneMain {
-		m.selMain = len(m.st.Timeline(m.st.Active())) - 1
-	} else {
-		_, it := m.threadItems()
-		m.selThread = len(it) - 1
+	m.selMain = len(m.st.Timeline(m.st.Active())) - 1
+}
+
+// focusSide moves focus to the left sidebar, selecting the open conversation.
+func (m *Model) focusSide() {
+	m.pane = paneSide
+	m.input.Blur()
+	m.tinput.Blur()
+	m.sideSel = 0
+	for i, e := range m.st.Sidebar() {
+		if e.Conv == m.st.Active() {
+			m.sideSel = i
+		}
 	}
+	m.sideSeen = -1
+}
+
+// sideKey drives the sidebar while it has focus; typing is ignored so nothing leaks into a box.
+func (m *Model) sideKey(k tea.KeyMsg) (bool, tea.Cmd) {
+	s := k.String()
+	es := m.st.Sidebar()
+	m.sideSel = clampInt(m.sideSel, 0, maxInt(0, len(es)-1))
+	switch s {
+	case keyUp, "k":
+		m.sideSel = maxInt(0, m.sideSel-1)
+	case keyDown, "j":
+		m.sideSel = minInt(len(es)-1, m.sideSel+1)
+	case "home":
+		m.sideSel = 0
+	case "end":
+		m.sideSel = maxInt(0, len(es)-1)
+	case keyRight, keyEnter, "l":
+		if len(es) > 0 {
+			m.switchConv(es[m.sideSel].Conv) // also hands focus to the textbox
+		}
+	case keyEsc:
+		m.focusInput()
+	case keyFocus, keyNextConv, keyPrevConv, keyQuit:
+		return false, nil
+	}
+	return true, nil
 }
 
 func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1119,6 +1164,14 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if msg.Button == tea.MouseButtonWheelUp {
 				d = -1
 			}
+			if m.overlay == overlayMembers {
+				m.memMove(d)
+				return m, nil
+			}
+			if sw, _, _ := m.layout(); m.overlay == overlayNone && msg.X < sw {
+				m.sideTop += 3 * d // the list's own scroll, independent of the selection
+				return m, nil
+			}
 			if m.pane == paneInput {
 				m.pane = paneMain
 				m.input.Blur()
@@ -1132,6 +1185,9 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Action != tea.MouseActionRelease || msg.Button != tea.MouseButtonLeft {
 		return m, nil
+	}
+	if m.overlay == overlayMembers {
+		return m.membersClick(msg)
 	}
 	if m.overlay != overlayNone {
 		if m.overlay == overlayPicker {
@@ -1225,4 +1281,47 @@ func (m *Model) mouseLeak(k tea.KeyMsg) bool {
 		return true
 	}
 	return false
+}
+
+// membersKey drives the members modal: arrows move, Enter opens the chat, Esc closes; every
+// other key is ignored so a stray keypress cannot dismiss it.
+func (m *Model) membersKey(s string) (tea.Model, tea.Cmd) {
+	switch s {
+	case keyEsc:
+		m.overlay = overlayNone
+	case keyUp:
+		m.memMove(-1)
+	case keyDown:
+		m.memMove(1)
+	case "pgup":
+		m.memMove(-8)
+	case "pgdown":
+		m.memMove(8)
+	case "home":
+		m.memMove(-1 << 20)
+	case "end":
+		m.memMove(1 << 20)
+	case keyEnter:
+		if p := m.headerPeople(m.st.Active()); m.memIdx < len(p) {
+			u := p[m.memIdx]
+			m.overlay = overlayNone
+			m.openDM(u)
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) membersClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if zone.Get("mem:x").InBounds(msg) {
+		m.overlay = overlayNone
+		return m, nil
+	}
+	for _, u := range m.headerPeople(m.st.Active()) {
+		if zone.Get("memu:" + u).InBounds(msg) {
+			m.overlay = overlayNone
+			m.openDM(u)
+			return m, nil
+		}
+	}
+	return m, nil // clicks elsewhere leave the modal open
 }

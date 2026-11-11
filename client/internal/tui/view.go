@@ -725,11 +725,13 @@ func (m *Model) headerPeople(conv string) []string {
 
 // Row backgrounds: a subtle accent, readable on dark and light terminals.
 var (
-	activeBg = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#2a3b5c", Light: "#dbe6ff"})
-	inputCol = lipgloss.AdaptiveColor{Dark: "#000000", Light: "#e2e2e8"}
-	inputBg  = lipgloss.NewStyle().Background(inputCol)
-	headerBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#1b2030", Light: "#eef1f8"})
-	selectBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#232f47", Light: "#e8eefc"})
+	activeBg  = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#2a3b5c", Light: "#dbe6ff"})
+	inputCol  = lipgloss.AdaptiveColor{Dark: "#000000", Light: "#e2e2e8"}
+	inputBg   = lipgloss.NewStyle().Background(inputCol)
+	headerBg  = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#1b2030", Light: "#eef1f8"})
+	sideBg    = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#171c28", Light: "#f1f4fb"})
+	sideSelBg = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#3a5288", Light: "#bcd0ff"})
+	selectBg  = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#232f47", Light: "#e8eefc"})
 )
 
 // bgFill pads line to w cells and paints st's background (and weight) across all of it. Inner
@@ -749,11 +751,13 @@ func (m *Model) viewSidebar(w, h int) string {
 	inner := w - 2
 	active := m.st.Active()
 	var lines []string
-	activeLine := 0
+	activeLine, selLine := 0, 0
+	focused := m.pane == paneSide
+	m.sideSel = clampInt(m.sideSel, 0, maxInt(0, len(m.st.Sidebar())-1))
 	section := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("244")).Faint(true)
 	lines = append(lines, section.Render("Channel"))
 	firstUser, firstRoom := true, true
-	for _, e := range m.st.Sidebar() {
+	for idx, e := range m.st.Sidebar() {
 		if e.Room && firstRoom {
 			lines = append(lines, dim.Render(" "+strings.Repeat("─", maxInt(1, inner-2))), section.Render("Rooms"))
 			firstRoom = false
@@ -806,25 +810,53 @@ func (m *Model) viewSidebar(w, h int) string {
 			}
 			row = zone.Mark("avs:"+e.Username, mini) + zone.Mark("side:"+e.Conv, " "+padTo(rest, inner-4))
 		}
-		if e.Conv == active {
+		if idx == m.sideSel {
+			selLine = len(lines)
+		}
+		if focused && idx == m.sideSel {
+			row = bgFill(row, inner, sideSelBg) // the keyboard cursor
+		} else if e.Conv == active {
 			activeLine = len(lines)
 			row = bgFill(row, inner, activeBg)
 		} else if m.hover == "side:"+e.Conv || (e.Username != "" && m.hover == "avs:"+e.Username) {
 			row = bgFill(row, inner, selectBg)
 		}
+		if e.Conv == active {
+			activeLine = len(lines)
+		}
 		lines = append(lines, row)
 	}
 	pet := m.petLines(inner, h-2)
 	listH := h - 2 - len(pet)
-	off := 0
-	if activeLine >= listH { // many users: the list scrolls, the pet stays put
-		off = activeLine - listH + 1
+	want := activeLine
+	if focused {
+		want = selLine
 	}
-	list := fit(lines[minInt(off, len(lines)):], inner, listH)
+	if want != m.sideSeen { // follow the cursor / open chat, but let the wheel scroll freely otherwise
+		m.sideSeen = want
+		if want < m.sideTop {
+			m.sideTop = want
+		}
+		if want >= m.sideTop+listH {
+			m.sideTop = want - listH + 1
+		}
+		if e := m.st.Sidebar(); focused && m.sideSel == 0 || len(e) == 0 {
+			m.sideTop = 0
+		}
+	}
+	m.sideTop = clampInt(m.sideTop, 0, maxInt(0, len(lines)-listH))
+	list := fit(lines[minInt(m.sideTop, len(lines)):], inner, listH)
+	if focused { // a faint tint across the whole column marks where the keyboard is
+		var tinted []string
+		for _, l := range strings.Split(list, "\n") {
+			tinted = append(tinted, bgFill(l, inner, sideBg))
+		}
+		list = strings.Join(tinted, "\n")
+	}
 	if len(pet) > 0 {
 		list += "\n" + strings.Join(pet, "\n")
 	}
-	return paneBox(list, inner, false)
+	return paneBoxHeavy(list, inner, focused)
 }
 
 // petFrames is a little dancing cat, 11 cells wide.
@@ -854,6 +886,21 @@ func (m *Model) petLines(inner, h int) []string {
 // content is lines already fitted to exactly innerW cells.
 func paneBox(content string, innerW int, focused bool) string {
 	return paneBoxBg(content, innerW, focused, nil)
+}
+
+// paneBoxHeavy is paneBox with a thick bright border when focused: same one-cell-wide characters,
+// so nothing inside shifts when the focus changes.
+func paneBoxHeavy(content string, innerW int, focused bool) string {
+	if !focused {
+		return paneBox(content, innerW, false)
+	}
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
+	out := []string{st.Render("┏" + strings.Repeat("━", innerW) + "┓")}
+	for _, l := range strings.Split(content, "\n") {
+		out = append(out, st.Render("┃")+padTo(l, innerW)+st.Render("┃"))
+	}
+	out = append(out, st.Render("┗"+strings.Repeat("━", innerW)+"┛"))
+	return strings.Join(out, "\n")
 }
 
 // paneBoxBg is paneBox whose border cells also carry bg, so a filled box has no gaps: the
@@ -956,15 +1003,16 @@ func (m *Model) viewChat(w, h int) string {
 	box := paneBoxBg(fit(boxed, inner-2, m.input.Height()), inner-2, m.pane == paneInput, inputCol)
 	lines = append(lines, strings.Split(zone.Mark("input", box), "\n")...)
 	lines = append(lines, foot)
-	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput)
+	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput && m.pane != paneSide)
 }
 
 // membersLine lists the conversation's people as "[ ● A, ○ B ]" (green dot = online); the owner is
 // picked out in the accent colour and marked "(owner)".
 func (m *Model) membersLine(conv string, r proto.Room, w int) string {
 	on := m.isOnline()
+	people := m.headerPeople(conv)
 	var parts []string
-	for _, u := range m.headerPeople(conv) {
+	for _, u := range people {
 		dot := dim.Render("○")
 		if on(u) {
 			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
@@ -978,7 +1026,37 @@ func (m *Model) membersLine(conv string, r proto.Room, w int) string {
 		}
 		parts = append(parts, zone.Mark("rm:"+u, dot+" "+st.Render(label)))
 	}
-	return fit([]string{dim.Render("[ ") + strings.Join(parts, dim.Render(", ")) + dim.Render(" ]")}, w, 1)
+	// One row only: pack as many people as fit; the rest go behind a "Show more" button.
+	sep, open, shut := dim.Render(", "), dim.Render("[ "), dim.Render(" ]")
+	more := func(n int) string {
+		st := accent.Underline(m.hover == "mem:more")
+		return dim.Render(" … ") + zone.Mark("mem:more", st.Render(fmt.Sprintf("+%d · Show more", n)))
+	}
+	used := lipgloss.Width(open) + lipgloss.Width(shut)
+	shown := 0
+	for i, p := range parts {
+		need := lipgloss.Width(p)
+		if i > 0 {
+			need += lipgloss.Width(sep)
+		}
+		reserve := 0
+		if i < len(parts)-1 {
+			reserve = lipgloss.Width(more(len(parts) - i - 1))
+		}
+		if used+need+reserve > w {
+			break
+		}
+		used += need
+		shown++
+	}
+	if shown == 0 && len(parts) > 0 { // very narrow: at least offer the button
+		return fit([]string{open + more(len(parts))[len(dim.Render(" … ")):] + shut}, w, 1)
+	}
+	line := open + strings.Join(parts[:shown], sep)
+	if shown < len(parts) {
+		line += more(len(parts) - shown)
+	}
+	return fit([]string{line + shut}, w, 1)
 }
 
 func (m *Model) viewThread(w, h int) string {
@@ -1081,23 +1159,7 @@ func (m *Model) overlayView() []string {
 			accent.Render("y")+dim.Render(" / ")+accent.Render("Enter")+"  close it",
 			dim.Render("any other key  keep it"))
 	case overlayMembers:
-		r, ok := m.activeRoom()
-		if !ok {
-			return nil
-		}
-		lines = append(lines, nameSt.Render(truncate(r.Name, 32))+dim.Render(fmt.Sprintf("  %d members · press any key", len(r.Members))), "")
-		on := m.isOnline()
-		for _, u := range r.Members {
-			dot := dim.Render("○")
-			if on(u) {
-				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
-			}
-			row := dot + " " + nameStyle(u).Render(m.nameOf(u)) + " " + dim.Render("@"+u)
-			if u == r.Owner && r.Owner != "" {
-				row += " " + accent.Render("owner")
-			}
-			lines = append(lines, row)
-		}
+		return m.membersModal()
 	case overlayHelp:
 		lines = append(lines, nameSt.Render("Shortcuts")+dim.Render("  press any key to close"), "")
 		for _, e := range helpEntries {
@@ -1202,4 +1264,82 @@ func (m *Model) View() string {
 	m.placeCursor(lines)
 	m.highlight(lines)
 	return strings.Join(lines, "\n")
+}
+
+// ---- members modal ----
+
+const memMinInner = 44
+
+// memGeom is the modal's inner width and how many member rows fit on screen.
+func (m *Model) memGeom(n int) (inner, rows int) {
+	inner = clampInt(m.w-6, 20, memMinInner)
+	rows = clampInt(n, 1, maxInt(3, m.h-10))
+	return
+}
+
+// memMove moves the selection and keeps it inside the scrolled window.
+func (m *Model) memMove(delta int) {
+	n := len(m.headerPeople(m.st.Active()))
+	if n == 0 {
+		return
+	}
+	_, rows := m.memGeom(n)
+	m.memIdx = clampInt(m.memIdx+delta, 0, n-1)
+	if m.memIdx < m.memTop {
+		m.memTop = m.memIdx
+	}
+	if m.memIdx >= m.memTop+rows {
+		m.memTop = m.memIdx - rows + 1
+	}
+	m.memTop = clampInt(m.memTop, 0, maxInt(0, n-rows))
+}
+
+func (m *Model) openMembers() { m.overlay, m.memIdx, m.memTop = overlayMembers, 0, 0 }
+
+// membersModal draws the scrollable member list: title and [X] on top, one row per person
+// (click or Enter opens that person's chat), a footer with the key hints.
+func (m *Model) membersModal() []string {
+	conv := m.st.Active()
+	r, _ := m.activeRoom()
+	people := m.headerPeople(conv)
+	inner, rows := m.memGeom(len(people))
+	cw := inner - 1 // one leading space
+	m.memIdx = clampInt(m.memIdx, 0, maxInt(0, len(people)-1))
+	m.memTop = clampInt(m.memTop, 0, maxInt(0, len(people)-rows))
+	closeBtn := zone.Mark("mem:x", accent.Bold(true).Render("[X]"))
+	lines := []string{padTo(fit([]string{m.convTitle(conv)}, maxInt(1, cw-4), 1), cw-3) + closeBtn, ""}
+	on := m.isOnline()
+	for i := m.memTop; i < m.memTop+rows && i < len(people); i++ {
+		u := people[i]
+		dot := dim.Render("○")
+		if on(u) {
+			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
+		}
+		row := dot + " " + nameStyle(u).Render(m.nameOf(u)) + " " + dim.Render("@"+u)
+		if u == r.Owner && r.Owner != "" {
+			row += " " + accent.Render("owner")
+		}
+		bar := " "
+		if len(people) > rows { // scrollbar: a block marks where the window sits
+			pos := i - m.memTop // row within the window
+			thumb := m.memTop * rows / len(people)
+			size := maxInt(1, rows*rows/len(people))
+			if pos >= thumb && pos < thumb+size {
+				bar = dim.Render("█")
+			} else {
+				bar = dim.Render("│")
+			}
+		}
+		cell := padTo(fit([]string{row}, cw-2, 1), cw-2)
+		if i == m.memIdx {
+			cell = bgFill(cell, cw-2, activeBg)
+		}
+		lines = append(lines, zone.Mark("memu:"+u, cell)+" "+bar)
+	}
+	lines = append(lines, "", dim.Render(fmt.Sprintf("↑/↓ select · Enter chat · Esc close  %d/%d", m.memIdx+1, len(people))))
+	padded := make([]string, len(lines)+2)
+	for i, l := range lines {
+		padded[i+1] = " " + l
+	}
+	return strings.Split(paneBox(fit(padded, inner, len(padded)), inner, true), "\n")
 }

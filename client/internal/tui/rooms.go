@@ -158,7 +158,7 @@ func (m *Model) roomCommand(cmd, arg string) (handled bool, c tea.Cmd) {
 			return true, nil
 		}
 		m.box().Reset()
-		m.overlay = overlayMembers
+		m.openMembers()
 	default:
 		return false, nil
 	}
