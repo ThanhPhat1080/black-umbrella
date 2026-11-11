@@ -107,6 +107,7 @@ type Model struct {
 	overlay          overlay
 	pickIdx          int
 	mentionNames     map[string]string // "@Display\u00a0Name" -> username for mentions picked in the textbox
+	helpTop          int               // /h modal: first visible line
 	sideSel, sideTop int               // sidebar focus: selected entry and scroll offset (rows)
 	sideSeen         int               // the line the sidebar last scrolled to, so wheel scrolling is not undone
 	memIdx, memTop   int               // members modal: selected row and scroll offset
@@ -706,7 +707,25 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.closeKey(s)
 	case overlayMembers:
 		return m.membersKey(s)
-	case overlayProfile, overlayHelp:
+	case overlayHelp:
+		switch s { // scrolling keys stay in the help; any other key closes it
+		case keyUp, "k":
+			m.helpMove(-1)
+		case keyDown, "j":
+			m.helpMove(1)
+		case "pgup":
+			m.helpMove(-8)
+		case "pgdown", " ":
+			m.helpMove(8)
+		case "home":
+			m.helpMove(-1 << 20)
+		case "end":
+			m.helpMove(1 << 20)
+		default:
+			m.overlay = overlayNone
+		}
+		return m, nil
+	case overlayProfile:
 		m.overlay = overlayNone
 		return m, nil
 	}
@@ -1102,7 +1121,7 @@ func (m *Model) command(text string) tea.Cmd {
 		m.overlay, m.pickIdx, m.pickThread = overlayPicker, 0, m.pane == paneThreadInput
 	case "/h", "/help":
 		m.box().Reset()
-		m.overlay = overlayHelp
+		m.overlay, m.helpTop = overlayHelp, 0
 	case "/whois":
 		u := strings.TrimPrefix(arg, "@")
 		if _, ok := m.st.Users()[u]; !ok {
@@ -1189,6 +1208,10 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 			if m.overlay == overlayMembers {
 				m.memMove(d)
+				return m, nil
+			}
+			if m.overlay == overlayHelp {
+				m.helpMove(3 * d)
 				return m, nil
 			}
 			if sw, _, _ := m.layout(); m.overlay == overlayNone && msg.X < sw {

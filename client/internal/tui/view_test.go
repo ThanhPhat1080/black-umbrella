@@ -1681,3 +1681,27 @@ func TestDownOnLastMessageFocusesTheTextbox(t *testing.T) {
 		t.Fatalf("Down on the last message should focus the textbox, pane=%v", m.pane)
 	}
 }
+
+func TestHelpModalScrollsAndOtherKeysClose(t *testing.T) {
+	m, _, _ := newTestModel(t)
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	m.View()
+	m.overlay, m.helpTop = overlayHelp, 0
+	v := ansi.Strip(strings.Join(m.overlayView(), "\n"))
+	if !strings.Contains(v, "Shortcuts") || strings.Contains(v, "Ctrl+C") {
+		t.Fatalf("a short screen should only show the first lines:\n%s", v)
+	}
+	press(m, tea.KeyEnd)
+	v = ansi.Strip(strings.Join(m.overlayView(), "\n"))
+	if m.overlay != overlayHelp || !strings.Contains(v, "Ctrl+C") || strings.Contains(v, "Alt+Enter") {
+		t.Fatalf("End should scroll to the bottom:\n%s", v)
+	}
+	press(m, tea.KeyUp)
+	if m.overlay != overlayHelp {
+		t.Fatal("scroll keys must not close the help")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.overlay != overlayNone {
+		t.Fatal("another key should close it")
+	}
+}

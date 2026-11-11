@@ -1164,14 +1164,7 @@ func (m *Model) overlayView() []string {
 	case overlayMembers:
 		return m.membersModal()
 	case overlayHelp:
-		lines = append(lines, nameSt.Render("Shortcuts")+dim.Render("  press any key to close"), "")
-		for _, e := range helpEntries {
-			if e[0] == "" {
-				lines = append(lines, "")
-				continue
-			}
-			lines = append(lines, accent.Render(padTo(e[0], 18))+e[1])
-		}
+		return m.helpModal()
 	case overlayProfile:
 		u, ok := m.st.Users()[m.profileUser]
 		if !ok {
@@ -1340,6 +1333,46 @@ func (m *Model) membersModal() []string {
 		lines = append(lines, zone.Mark("memu:"+u, cell)+" "+bar)
 	}
 	lines = append(lines, "", dim.Render(fmt.Sprintf("↑/↓ select · Enter chat · Esc close  %d/%d", m.memIdx+1, len(people))))
+	padded := make([]string, len(lines)+2)
+	for i, l := range lines {
+		padded[i+1] = " " + l
+	}
+	return strings.Split(paneBox(fit(padded, inner, len(padded)), inner, true), "\n")
+}
+
+// ---- help modal ----
+
+// helpRows is how many shortcut lines fit on screen at once.
+func (m *Model) helpRows() int { return maxInt(5, m.h-8) }
+
+func (m *Model) helpMove(delta int) {
+	m.helpTop = clampInt(m.helpTop+delta, 0, maxInt(0, len(helpEntries)-m.helpRows()))
+}
+
+// helpModal draws the shortcut cheat sheet, scrolled when it is taller than the screen.
+func (m *Model) helpModal() []string {
+	rows := m.helpRows()
+	m.helpMove(0)
+	lines := []string{nameSt.Render("Shortcuts"), ""}
+	end := minInt(len(helpEntries), m.helpTop+rows)
+	for i := m.helpTop; i < end; i++ {
+		e := helpEntries[i]
+		if e[0] == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, accent.Render(padTo(e[0], 18))+e[1])
+	}
+	hint := "any key closes"
+	if len(helpEntries) > rows {
+		hint = fmt.Sprintf("↑/↓ PgUp/PgDn scroll · any other key closes   %d-%d of %d", m.helpTop+1, end, len(helpEntries))
+	}
+	lines = append(lines, "", dim.Render(hint))
+	inner := 0
+	for _, l := range lines {
+		inner = maxInt(inner, width(l)+2)
+	}
+	inner = minInt(inner, maxInt(3, m.w-6))
 	padded := make([]string, len(lines)+2)
 	for i, l := range lines {
 		padded[i+1] = " " + l

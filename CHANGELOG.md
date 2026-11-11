@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.1 — 2026-11-11
+- Client: the `/h` shortcuts list scrolls when it does not fit the screen (`↑/↓`, `PgUp/PgDn`, `Home/End`, mouse wheel); any other key still closes it.
+
 ## v1.6.0 — 2026-11-11
 - Client: new talking animals like `/cow`: `/cat`, `/rabbit`, `/dog`, `/duck` (optionally followed by what they say).
 - Client: `/fish` sends a school of fish that swims across the chat.
