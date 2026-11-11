@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0 — 2026-11-11
+- Client: `@mentions` show the person's display name (`● @Phát 🌂`) instead of the username.
+- Client: a `/buzz` plays a system alert sound; being `@mentioned` plays a softer one (macOS system sounds, Windows system sound, freedesktop sounds on Linux, terminal bell as fallback).
+- Client: a buzz no longer shows the thread-reply button and cannot be opened as a thread.
+
 ## v1.3.2 — 2026-11-11
 - Client: on Windows, a failed `/update` now says so clearly and points to the download page; permission errors there suggest running PowerShell as administrator instead of `sudo`. Linux `/update` (including through `sudo` and symlinks) was checked in a container.
 

@@ -33,8 +33,11 @@ func TestMentionChipShowsDotAndIsPlainForUnknownUsers(t *testing.T) {
 	m, _ := roomWithMention(t)
 	m.View()
 	screen := strings.Join(m.screen, "\n")
-	if !strings.Contains(screen, "● @bob") {
-		t.Fatalf("chip missing:\n%s", screen)
+	if !strings.Contains(strings.ReplaceAll(screen, "\u00a0", " "), "● @"+m.st.DisplayName("bob")) {
+		t.Fatalf("chip should show the display name:\n%s", screen)
+	}
+	if strings.Contains(screen, "@bob ") {
+		t.Fatal("the chip must show the display name, not the username")
 	}
 	if strings.Contains(screen, "● @nobody") {
 		t.Fatal("unknown users get no chip")

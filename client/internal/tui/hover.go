@@ -14,9 +14,9 @@ import (
 // chipLookup resolves @name to a known user for the mention chips (a snapshot taken per render).
 func (m *Model) chipLookup() chipLookup {
 	us := m.st.Users()
-	return func(name string) (string, bool, bool) {
+	return func(name string) (string, string, bool, bool) {
 		u, ok := us[strings.ToLower(name)]
-		return u.Username, u.Online, ok && u.Username != ""
+		return u.Username, m.st.DisplayName(u.Username), u.Online, ok && u.Username != ""
 	}
 }
 

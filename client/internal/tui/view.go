@@ -120,7 +120,8 @@ func splitTokens(s string) []string {
 	return toks
 }
 
-var mentionRe = regexp.MustCompile(`(?:●\x{00a0})?@[A-Za-z0-9_]+`)
+// mentionRe finds a mention: a chip (dot, no-break space, @, display name up to the next space) or a plain @name.
+var mentionRe = regexp.MustCompile(`●\x{00a0}@\S*|@[A-Za-z0-9_]+`)
 
 // chipDot precedes a mention of a known user so that line wrapping leaves room for the presence dot
 // drawn there; chipRe finds the mentions that get one (@name at the start or after whitespace).
@@ -128,8 +129,13 @@ const chipDot = "●\u00a0" // dot + no-break space, so wrapping never splits th
 
 var chipRe = regexp.MustCompile(`(^|\s)@([A-Za-z0-9_]+)`)
 
-// chipLookup resolves a typed name to a known user (canonical username, online) .
-type chipLookup func(name string) (user string, online, ok bool)
+// chipLookup resolves a typed name to a known user: the canonical username, the display name shown
+// in the chip, and whether they are online.
+type chipLookup func(name string) (user, label string, online, ok bool)
+
+// chipLabel is the chip text after the @: the display name with spaces made non-breaking so that
+// wrapping keeps the chip in one piece.
+func chipLabel(label string) string { return strings.ReplaceAll(label, " ", "\u00a0") }
 
 // chipText puts chipDot in front of every mention of a known user.
 func chipText(text string, look chipLookup) string {
@@ -138,10 +144,11 @@ func chipText(text string, look chipLookup) string {
 	}
 	return chipRe.ReplaceAllStringFunc(text, func(tok string) string {
 		sub := chipRe.FindStringSubmatch(tok)
-		if _, _, ok := look(sub[2]); !ok {
+		_, label, _, ok := look(sub[2])
+		if !ok {
 			return tok
 		}
-		return sub[1] + chipDot + "@" + sub[2]
+		return sub[1] + chipDot + "@" + chipLabel(label)
 	})
 }
 
@@ -152,7 +159,7 @@ func chipUsers(text string, look chipLookup) []string {
 	}
 	var out []string
 	for _, sub := range chipRe.FindAllStringSubmatch(text, -1) {
-		if u, _, ok := look(sub[2]); ok {
+		if u, _, _, ok := look(sub[2]); ok {
 			out = append(out, u)
 		}
 	}
@@ -164,7 +171,8 @@ type chipCtx struct {
 	id    string
 	look  chipLookup
 	hover string
-	n     int // chips drawn so far in this message
+	users []string // the users behind the chips of the message, in order
+	n     int      // chips drawn so far in this message
 }
 
 // styleBody styles a (wrapped) body line: italic text, links underlined, mentions of me highlighted.
@@ -193,9 +201,20 @@ func styleMentions(s, me string, c *chipCtx) string {
 		name := strings.TrimPrefix(strings.TrimPrefix(tok, chipDot), "@")
 		switch {
 		case isChip && c != nil:
-			user, online, ok := c.look(name)
+			if c.n >= len(c.users) {
+				continue
+			}
+			user := c.users[c.n]
+			_, label, online, ok := c.look(user)
 			if !ok {
 				continue
+			}
+			// the token runs to the next space; cut it to the display name (punctuation may follow)
+			want := chipDot + "@" + chipLabel(label)
+			if strings.HasPrefix(tok, want) {
+				loc[1] = loc[0] + len(want)
+			} else if !strings.HasPrefix(want, tok) {
+				continue // not this chip's text: leave it as plain text
 			}
 			id := fmt.Sprintf("men:%s:%d", c.id, c.n)
 			c.n++
@@ -207,7 +226,7 @@ func styleMentions(s, me string, c *chipCtx) string {
 				st = st.Underline(true)
 			}
 			out.WriteString(italic(s[pos:loc[0]]))
-			out.WriteString(zone.Mark(id, presenceDot(online)+" "+st.Italic(true).Render("@"+name)))
+			out.WriteString(zone.Mark(id, presenceDot(online)+" "+st.Italic(true).Render(s[loc[0]+len(chipDot):loc[1]])))
 			pos = loc[1]
 		case !isChip && me != "" && strings.EqualFold(name, me):
 			out.WriteString(italic(s[pos:loc[0]]))
@@ -410,7 +429,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 		lt := newLinkTracker(text)
 		var chips *chipCtx
 		if v.User != nil && !isBuzz && !m.Undecryptable {
-			chips = &chipCtx{id: m.ID, look: v.User, hover: v.Hover}
+			chips = &chipCtx{id: m.ID, look: v.User, hover: v.Hover, users: chipUsers(text, v.User)}
 		}
 		off := 0
 		for i := range body {
@@ -441,7 +460,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	case m.Kept: // someone else's kept message: a marker, not a button
 		btns = append(btns, keptStyle.Render("⚓"))
 	}
-	if !v.InThread {
+	if !v.InThread && !isBuzz { // a buzz takes no thread replies
 		label := "[💬]"
 		if m.Replies > 0 {
 			label = fmt.Sprintf("[💬 %d]", m.Replies)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ThanhPhat1080/black-umbrella/client/internal/sound"
 	"os"
 	"os/exec"
 	"regexp"
@@ -442,11 +443,13 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 		m.switchConv(a)
 	}
 	if fx.Bell {
-		// BEL is zero-width and written in one write(2), so it cannot corrupt a frame.
-		cmds = append(cmds, func() tea.Msg { _, _ = os.Stdout.WriteString("\a"); return nil })
+		cmds = append(cmds, func() tea.Msg { sound.Mention(); return nil }) // falls back to BEL
 	}
 	if fx.Bell { // Bell is only ever set by a mention of me
 		cmds = append(cmds, m.nudge.begin(time.Now()))
+	}
+	if fx.Buzz && ev.Message != nil {
+		cmds = append(cmds, func() tea.Msg { sound.Buzz(); return nil })
 	}
 	if fx.Buzz && ev.Message != nil && ev.Message.Conv == m.st.Active() {
 		cmds = append(cmds, m.buzz.begin(ev.Message.ID, time.Now()))
@@ -615,6 +618,9 @@ func (m *Model) selectedMsg() (chat.Msg, bool) {
 	}
 	return chat.Msg{}, false
 }
+
+// isBuzz: a buzz is a one-off effect, so it takes no thread replies.
+func isBuzz(msg chat.Msg) bool { return msg.Text == chat.BuzzText && !msg.Undecryptable }
 
 func (m *Model) openThread(msg chat.Msg) {
 	id := msg.ID
@@ -893,7 +899,7 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toggleKeep(msg)
 		}
 	case keyRight:
-		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
+		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain && !isBuzz(msg) {
 			m.openThread(msg)
 			m.focusThreadInput()
 		}
@@ -918,7 +924,7 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case keyOpenThrd:
-		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain {
+		if msg, ok := m.selectedMsg(); ok && m.pane == paneMain && !isBuzz(msg) {
 			m.openThread(msg)
 		}
 	default:
@@ -1175,7 +1181,7 @@ func (m *Model) onMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case zone.Get("keep:" + v.ID).InBounds(msg):
 			m.toggleKeep(v)
 			return m, nil
-		case zone.Get("thr:" + v.ID).InBounds(msg):
+		case !isBuzz(v) && zone.Get("thr:"+v.ID).InBounds(msg):
 			m.openThread(v)
 			m.focusThreadInput()
 			return m, nil
