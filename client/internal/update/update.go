@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -184,6 +185,9 @@ func apply(ctx context.Context, rel Release, goos, goarch, exe string) error {
 	}
 	return os.Rename(tmp.Name(), exe)
 }
+
+// NeedsRoot reports whether err means the install folder isn't writable by this user (e.g. /usr/local/bin).
+func NeedsRoot(err error) bool { return errors.Is(err, fs.ErrPermission) }
 
 // Run updates the running binary if a newer release exists. It returns the
 // installed tag and whether anything changed.

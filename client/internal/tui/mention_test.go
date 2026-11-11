@@ -1,6 +1,10 @@
 package tui
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"runtime"
 	"time"
 
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/e2e"
@@ -214,5 +218,29 @@ func TestMentionNudgesButPlainMessageDoesNot(t *testing.T) {
 	}
 	if m.buzz.id != "" {
 		t.Fatal("a mention is not a buzz")
+	}
+}
+
+func TestUpdateNeedingRootHandsTheTerminalToSudo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no sudo on Windows")
+	}
+	m, _, _ := newTestModel(t)
+	_, cmd := m.Update(updateMsg{err: fmt.Errorf("can't write next to /usr/local/bin/umbrella: %w", fs.ErrPermission)})
+	if cmd == nil || !strings.Contains(m.status, "administrator") {
+		t.Fatalf("cmd=%v status=%q", cmd, m.status)
+	}
+	m.Update(sudoUpdateMsg{})
+	if !strings.Contains(m.status, "Updated") {
+		t.Fatalf("status %q", m.status)
+	}
+	m.Update(sudoUpdateMsg{err: errors.New("exit 1")})
+	if !strings.Contains(m.status, "sudo umbrella update") {
+		t.Fatalf("status %q", m.status)
+	}
+	// other errors are shown as before
+	_, cmd = m.Update(updateMsg{err: errors.New("offline")})
+	if cmd != nil || !strings.Contains(m.status, "Update failed: offline") {
+		t.Fatalf("cmd=%v status=%q", cmd, m.status)
 	}
 }

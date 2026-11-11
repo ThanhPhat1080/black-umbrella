@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -232,6 +234,9 @@ func (m *Model) doReconnect() tea.Cmd {
 // Version is the running build's version, set by main; used by /update.
 var Version = "dev"
 
+// sudoUpdateMsg is the result of `sudo umbrella update`, run with the terminal handed over.
+type sudoUpdateMsg struct{ err error }
+
 type updateMsg struct {
 	tag     string
 	updated bool
@@ -357,8 +362,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending = map[string]*pendingSend{}
 		m.setStatus("Reconnected.")
 		return m, waitEvent(m.conn)
+	case sudoUpdateMsg:
+		if msg.err != nil {
+			m.setStatus("Update failed. In a terminal run: sudo umbrella update")
+		} else {
+			m.setStatus("Updated. Quit (/q) and reopen to use it.")
+		}
+		return m, nil
 	case updateMsg:
 		switch {
+		case msg.err != nil && update.NeedsRoot(msg.err) && runtime.GOOS != "windows":
+			if exe, err := os.Executable(); err == nil {
+				m.setStatus("Needs administrator rights: enter your password below…")
+				return m, tea.ExecProcess(exec.Command("sudo", exe, "update"), func(err error) tea.Msg { return sudoUpdateMsg{err} })
+			}
+			m.setStatus("Update failed. In a terminal run: sudo umbrella update")
 		case msg.err != nil:
 			m.setStatus("Update failed: " + msg.err.Error())
 		case msg.updated:

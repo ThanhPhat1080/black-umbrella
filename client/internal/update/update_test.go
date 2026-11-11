@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -74,5 +75,34 @@ func TestApply(t *testing.T) {
 	got, _ = os.ReadFile(exe)
 	if string(got) != "old" {
 		t.Fatalf("exe changed on bad checksum: %q", got)
+	}
+}
+
+func TestApplyReportsPermissionProblemAsNeedsRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	bin := []byte("new")
+	sum := sha256.Sum256(bin)
+	name := assetName("linux", "amd64")
+	mux := http.NewServeMux()
+	mux.HandleFunc("/bin", func(w http.ResponseWriter, _ *http.Request) { w.Write(bin) })
+	mux.HandleFunc("/sums", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), name)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "umbrella")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	os.Chmod(dir, 0o555) // like /usr/local/bin for a normal user
+	defer os.Chmod(dir, 0o755)
+	rel := Release{Tag: "v9.9.9", Assets: map[string]string{name: srv.URL + "/bin", "SHA256SUMS.txt": srv.URL + "/sums"}}
+	err := apply(context.Background(), rel, "linux", "amd64", exe)
+	if err == nil || !NeedsRoot(err) {
+		t.Fatalf("want a permission error, got %v", err)
+	}
+	if NeedsRoot(errors.New("boom")) {
+		t.Fatal("other errors are not permission problems")
 	}
 }

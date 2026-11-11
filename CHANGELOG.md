@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.3.1 — 2026-11-11
+- Client: `/update` no longer fails when Umbrella lives in a folder only an administrator can write to (e.g. `/usr/local/bin` on macOS): it hands the terminal to `sudo umbrella update`, asks for your password, then returns to the chat.
+
 ## v1.3.0 — 2026-11-11
 - Client: `@mentions` of known users show as a presence dot plus the name in that user's colour (`● @bob`). Click a mention, a name in a message header or a name in the room's member list to open the chat with that person. The mouse pointer turns into a hand over clickable names (terminals that support OSC 22: kitty, WezTerm, foot, Ghostty, xterm) and the item under the mouse is highlighted everywhere.
 - Client: drag the sidebar's right edge with the mouse to make it narrower or wider (16-50 columns).
