@@ -68,6 +68,33 @@ Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA
 On first install reopen PowerShell. If SmartScreen warns, choose **More info → Run anyway**. If Windows says
 the file is in use, close every running `umbrella` window and retry. Windows Terminal is recommended.
 
+## Desktop app (Linux)
+
+The same client in its own window (Electron + xterm.js, the Go binary is bundled), for people who
+would rather not use a terminal. Everything works as in the terminal (commands, keys, animations);
+the differences are web-app style editing and a few native touches:
+
+- First start: if there is no key yet the window runs `umbrella register` (invite code, username, name, PIN).
+  After that you only type your PIN. The key stays in `~/.umbrella/`, shared with the terminal client.
+- Ctrl+C copies the selection, Ctrl+X cuts, Ctrl+V pastes, Ctrl+A selects all in the textbox; drag with the
+  mouse to select text in a pane. Ctrl+C does not quit (use `/quit` or close the window). No right-click menu.
+- Notifications for direct messages, mentions and buzzes when the window is in the background; the unread
+  count is in the window title; `/buzz` shakes the whole window. Ctrl+= / Ctrl+- / Ctrl+0 change the font size.
+- On start it checks GitHub for a newer release and shows a notification (there is no `/update` in the app).
+
+Install from the [latest release](https://github.com/ThanhPhat1080/black-umbrella/releases/latest):
+
+```sh
+sudo apt install ./umbrella-desktop-<version>-amd64.deb        # Ubuntu / Debian (recommended)
+# or the AppImage; Ubuntu 24.04+ needs the FUSE 2 library first:
+sudo apt install libfuse2t64
+chmod +x umbrella-desktop-<version>-x86_64.AppImage && ./umbrella-desktop-<version>-x86_64.AppImage
+```
+
+Build it yourself (needs Go 1.24+ and Node 22): `scripts/build-desktop.sh https://umbrella.black-umbrella.workers.dev v1.7.0`
+-> `dist/umbrella-desktop-*.deb` and `.AppImage`. For development: `cd desktop && npm ci && npm start`
+(set `UMBRELLA_BIN` to a client binary, or put it in `desktop/bin/umbrella`; `npm test` runs the unit tests).
+
 ## Build the client
 
 Needs Go 1.24+.

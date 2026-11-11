@@ -9,6 +9,7 @@
 | Linux x86-64 | `umbrella-linux-amd64` |
 | Linux ARM64 | `umbrella-linux-arm64` |
 | Windows | `umbrella-windows-amd64.exe` |
+| Linux desktop app (window, x86-64) | `umbrella-desktop-<version>-amd64.deb` or `umbrella-desktop-<version>-x86_64.AppImage` |
 
 **From v1.2.0:** just type `/update` in the chat (or `umbrella update`).
 
@@ -22,5 +23,7 @@ Get an invite code from your admin, then run `umbrella register`, then `umbrella
 The binaries are unsigned:
 - **macOS:** `sudo mkdir -p /usr/local/bin && sudo mv umbrella-darwin-arm64 /usr/local/bin/umbrella && sudo chmod +x /usr/local/bin/umbrella && sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella`
 - **Windows:** choose SmartScreen → More info → Run anyway.
+
+**Desktop app (Linux):** `sudo apt install ./umbrella-desktop-<version>-amd64.deb` (recommended), or `chmod +x` the AppImage and run it (needs `libfuse2`). The same chat in a window: normal Ctrl+C / Ctrl+V, notifications, no terminal needed. See the README.
 
 Verify downloads with `SHA256SUMS.txt`.

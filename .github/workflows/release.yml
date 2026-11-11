@@ -29,6 +29,18 @@ jobs:
           GOTOOLCHAIN: local
         run: go test ./...
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Test desktop app
+        working-directory: desktop
+        run: |
+          npm ci
+          npm test
+
       - name: Build binaries
         env:
           GOTOOLCHAIN: local
@@ -36,6 +48,14 @@ jobs:
         run: |
           scripts/build.sh https://umbrella.black-umbrella.workers.dev "$VERSION"
           cd dist && sha256sum umbrella-* > SHA256SUMS.txt
+
+      - name: Build desktop app (Linux x64)
+        env:
+          GOTOOLCHAIN: local
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          scripts/build-desktop.sh https://umbrella.black-umbrella.workers.dev "$VERSION"
+          cd dist && sha256sum umbrella-desktop-* >> SHA256SUMS.txt
 
       - name: Publish release
         env:

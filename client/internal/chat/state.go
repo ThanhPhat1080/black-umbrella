@@ -36,6 +36,7 @@ type Effects struct {
 	Bell, Buzz, Dance, Fish bool
 	Status                  string // a line worth showing the user (e.g. "Bob added you to Dev")
 	Gone                    string // a room conversation that just disappeared
+	Incoming                *Msg   // a new message from someone else (set for the desktop app's notifications)
 }
 
 type Entry struct {
@@ -219,6 +220,7 @@ func (s *State) Apply(ev proto.Event) Effects {
 
 // noteIncoming does the unread / mention bookkeeping for a message from someone else.
 func (s *State) noteIncoming(m *Msg, fx *Effects) {
+	fx.Incoming = m
 	if (m.Conv == "hell" || strings.HasPrefix(m.Conv, "room:")) && !m.Undecryptable && Mentions(m.Text, s.me) {
 		fx.Bell = true
 	}
@@ -331,6 +333,15 @@ func (s *State) SetActive(conv string) {
 }
 
 func (s *State) Active() string { return s.active }
+
+// UnreadTotal is the number of unread messages across all conversations.
+func (s *State) UnreadTotal() int {
+	n := 0
+	for _, c := range s.unread {
+		n += c
+	}
+	return n
+}
 
 // Recipients lists the public keys a message in conv must be sealed for (always including me).
 func (s *State) Recipients(conv string) map[string][32]byte {

@@ -1,0 +1,7 @@
+:root { --bg: #14161a; }
+html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+#shaker { position: fixed; inset: 0; will-change: transform; }
+#term { position: absolute; inset: 6px 8px; }
+.xterm .xterm-viewport { background-color: transparent !important; }
+/* The desktop app is a window, not a document: nothing outside the terminal is selectable. */
+body { user-select: none; -webkit-user-select: none; cursor: default; }

@@ -118,6 +118,7 @@ type Model struct {
 	screen       []string        // plain text of the last rendered frame, for mouse selection
 	leakUntil    time.Time       // while set, stray mouse-report fragments are swallowed
 	selectMode   bool            // mouse capture off so the terminal can select text
+	sentUnread   int             // last unread total sent to the desktop app
 	pickThread   bool            // the kaomoji picker was opened from the thread box
 	fatal        string          // non-empty: connection is permanently gone (revoked / locked)
 	status       string
@@ -337,6 +338,12 @@ func (m *Model) resize() {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	m.hostUnread()
+	return mm, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -449,6 +456,7 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	if a := m.st.Active(); a != prev { // the open room vanished (kicked, closed, left)
 		m.switchConv(a)
 	}
+	m.hostNotify(ev, fx)
 	if fx.Bell {
 		cmds = append(cmds, func() tea.Msg { sound.Mention(); return nil }) // falls back to BEL
 	}
@@ -681,6 +689,9 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	s := k.String()
+	if hostElectron && m.fatal == "" && (s == "ctrl+c" || s == "ctrl+x") {
+		return m.copySel(s == "ctrl+x") // like a web app: Ctrl+C copies, never quits
+	}
 	if m.overlay == overlayQuit { // Ctrl+C again, y or Enter confirms; any other key stays
 		if s == keyQuit || s == "y" || s == "Y" || s == keyEnter {
 			return m, tea.Quit
@@ -730,22 +741,7 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if s == keyCopySel {
-		text := ""
-		switch {
-		case m.drag.shown:
-			text = m.selectedText()
-		case m.selAllBox != nil:
-			text = m.selAllBox.Value()
-		}
-		switch {
-		case text == "":
-			m.setStatus("Nothing selected.")
-		case copyText(text) != nil:
-			m.setStatus("Could not copy.")
-		default:
-			m.setStatus(fmt.Sprintf("Copied %d characters.", utf8.RuneCountInString(text)))
-		}
-		return m, nil
+		return m.copySel(false)
 	}
 	m.drag.shown = false
 	if handled, cmd := m.mentionKey(k); handled {
@@ -1065,6 +1061,11 @@ func (m *Model) command(text string) tea.Cmd {
 	case "/quit", "/q":
 		return tea.Quit
 	case "/update":
+		if hostElectron {
+			m.box().Reset()
+			m.setStatus("The desktop app checks for new versions when it starts.")
+			return nil
+		}
 		m.box().Reset()
 		m.setStatus("Checking for updates…")
 		return doUpdate()

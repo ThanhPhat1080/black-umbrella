@@ -6,3 +6,6 @@ dist/
 /client/umbrella
 *.test
 .env
+
+# desktop app
+/desktop/bin/

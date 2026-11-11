@@ -1,0 +1,76 @@
+{
+  "name": "umbrella-desktop",
+  "productName": "Umbrella",
+  "version": "0.0.0-dev",
+  "description": "Desktop app for Umbrella: the terminal client in a window, with native copy and paste.",
+  "main": "src/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": {
+    "name": "Umbrella",
+    "email": "umbrella@localhost"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --linux AppImage deb --x64 --publish never"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@fontsource/noto-color-emoji": "5.3.2",
+    "@lydell/node-pty": "1.1.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/addon-webgl": "0.19.0",
+    "@xterm/xterm": "6.0.0"
+  },
+  "devDependencies": {
+    "electron": "42.11.18",
+    "electron-builder": "26.8.1"
+  },
+  "build": {
+    "appId": "com.black-umbrella.desktop",
+    "productName": "Umbrella",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**",
+      "!src/smoke.js",
+      "package.json",
+      "node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "bin/umbrella",
+        "to": "bin/umbrella"
+      }
+    ],
+    "artifactName": "umbrella-desktop-${version}-${arch}.${ext}",
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "icon": "build/icon.png",
+      "maintainer": "Umbrella <umbrella@localhost>",
+      "synopsis": "Umbrella chat",
+      "executableName": "umbrella-desktop"
+    },
+    "deb": {
+      "depends": [
+        "libnotify4",
+        "libxss1",
+        "libnss3",
+        "libgtk-3-0",
+        "libxtst6",
+        "xdg-utils"
+      ]
+    },
+    "electronDist": "node_modules/electron/dist"
+  },
+  "homepage": "https://github.com/ThanhPhat1080/black-umbrella"
+}

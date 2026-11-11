@@ -72,6 +72,32 @@ sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella
 sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella
 ```
 
+### Linux: bản app có cửa sổ (không cần terminal)
+
+Ngoài file `umbrella-linux-amd64` chạy trong terminal, có thêm **app desktop** (Electron): cùng một client, mở bằng icon trong menu ứng dụng. Mọi lệnh và phím giống hệt bản terminal; khác ở chỗ thao tác như web app:
+
+- Mở app lần đầu, nếu chưa có key thì cửa sổ tự chạy bước đăng ký (mã mời, username, tên hiển thị, PIN). Sau đó mỗi lần mở chỉ cần nhập PIN. Key vẫn ở `~/.umbrella/`, dùng chung với bản terminal.
+- **Ctrl+C** copy phần đang chọn, **Ctrl+X** cắt, **Ctrl+V** dán, **Ctrl+A** tô đen hết ô nhập. Kéo chuột để chọn chữ trong khung chat. Ctrl+C không thoát app (gõ `/quit` hoặc đóng cửa sổ). Không có menu chuột phải.
+- Có thông báo desktop khi bạn nhận tin nhắn riêng, bị @nhắc hoặc bị buzz lúc cửa sổ đang ở nền; số tin chưa đọc hiện trên tiêu đề cửa sổ; `/buzz` làm rung cả cửa sổ. **Ctrl+=**, **Ctrl+-**, **Ctrl+0** đổi cỡ chữ.
+- App tự kiểm tra bản mới khi mở và báo bằng thông báo (không có `/update` trong app).
+
+Cài từ trang Releases:
+
+```bash
+sudo apt install ./umbrella-desktop-<phiên-bản>-amd64.deb
+```
+
+Hoặc dùng AppImage (Ubuntu 24.04 trở lên cần cài thêm thư viện FUSE 2 một lần):
+
+```bash
+sudo apt install libfuse2t64
+```
+```bash
+chmod +x umbrella-desktop-<phiên-bản>-x86_64.AppImage && ./umbrella-desktop-<phiên-bản>-x86_64.AppImage
+```
+
+Cập nhật: tải bản mới và cài đè như lần đầu.
+
 ### Windows (PowerShell)
 
 ```powershell
@@ -383,6 +409,8 @@ scripts/build.sh https://umbrella.black-umbrella.workers.dev
 ```
 
 Kết quả nằm trong `dist/`. Đăng lên trang Releases của GitHub để mọi người tải.
+
+Bản app desktop cho Linux (cần thêm Node 22): `scripts/build-desktop.sh https://umbrella.black-umbrella.workers.dev v1.7.0` tạo `dist/umbrella-desktop-*.deb` và `.AppImage`. Workflow `release.yml` tự build cùng lúc khi đẩy tag `v*`. Chạy thử khi phát triển: `cd desktop && npm ci && npm start` (đặt `UMBRELLA_BIN` trỏ tới binary client, hoặc để ở `desktop/bin/umbrella`).
 
 ## 7. Chạy thử ở máy local
 

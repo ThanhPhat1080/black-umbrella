@@ -41,7 +41,7 @@ func (m *Model) selectAllKey(b *textarea.Model, k tea.KeyMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		m.selAllBox = b
-		m.setStatus(fmt.Sprintf("Selected all (%d characters). %s to copy, type to replace, Backspace to cut.", utf8.RuneCountInString(b.Value()), keyCopySel))
+		m.setStatus(fmt.Sprintf("Selected all (%d characters). %s to copy, type to replace, Backspace to cut.", utf8.RuneCountInString(b.Value()), copyKeyName()))
 		return true, nil
 	}
 	if m.selAllBox != b {

@@ -1128,7 +1128,7 @@ func (m *Model) viewStatus() string {
 	case time.Now().Before(m.statusUntil):
 		right = m.status
 	default:
-		right = dim.Render(helpLine)
+		right = dim.Render(helpHint())
 	}
 	return fit([]string{left + right}, m.w, 1)
 }
@@ -1255,6 +1255,9 @@ func (m *Model) View() string {
 	dx := m.buzz.shake(time.Now())
 	if dx == 0 { // a buzz wins over the gentler mention nudge
 		dx = m.nudge.shake(time.Now())
+	}
+	if hostElectron {
+		dx = 0 // the desktop app shakes the whole window smoothly, pixel by pixel
 	}
 	if dx != 0 {
 		lines = shiftLines(lines, dx, m.w)

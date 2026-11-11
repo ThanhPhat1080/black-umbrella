@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- Desktop app (Linux x64, Electron): the Umbrella client in its own window, built as `.deb` and AppImage (`scripts/build-desktop.sh`). It runs the same client, so every command, key and animation is identical. The first start runs `umbrella register` in the window when there is no key; after that you only type your PIN.
+- Desktop app: native copy/paste like a web app. Ctrl+C copies the selection, Ctrl+X cuts, Ctrl+V pastes, Ctrl+A selects all in the textbox (highlight only), no select mode and no right-click menu. Ctrl+C no longer quits; use `/quit` or close the window.
+- Desktop app: desktop notifications for direct messages, mentions and buzzes while the window is in the background, the unread count in the window title, and a smooth pixel-level window shake for `/buzz` and mentions. `/update` is replaced by a check for a newer release on start. Bundled JetBrains Mono (with Vietnamese) and Noto Color Emoji fonts. Ctrl+= / Ctrl+- / Ctrl+0 change the font size.
+- Desktop app: Vietnamese input methods (IBus with Vikey, Bamboo, Unikey; fcitx) type correctly and appear letter by letter. The app now mirrors the input method's text field into the client as it changes, whichever way the engine edits (a long preedit, or delete-and-recommit), instead of waiting for a composition to end. Set `UMBRELLA_IME_DEBUG=1` to log input-method events to `/tmp/umbrella-ime.log` when reporting a typing problem.
+- Client: when started by the desktop app (`UMBRELLA_HOST=electron`) it uses OSC 52 for the clipboard and OSC 777 for notifications; the terminal client behaves exactly as before.
+
 ## v1.6.2 — 2026-11-12
 - Client: the textbox no longer shows the "Message… (/i for kaomoji)" placeholder; the line under it now reads `[+] kaomoji  /h for shortcut`, with the `0/4000` counter at the right edge.
 
