@@ -70,12 +70,8 @@ func (m *Model) dragMouse(msg tea.MouseMsg) bool {
 			return false
 		}
 		d.cx, d.cy = clampInt(msg.X, d.x0, d.x1-1), m.dragRow(msg.Y)
-		if text := m.selectedText(); text != "" {
-			if err := copyText(text); err != nil {
-				m.setStatus("Could not copy: " + err.Error())
-			} else {
-				m.setStatus(fmt.Sprintf("Copied %d characters.", utf8.RuneCountInString(text)))
-			}
+		if text := m.selectedText(); text != "" { // selecting never copies by itself
+			m.setStatus(fmt.Sprintf("Selected %d characters · %s to copy.", utf8.RuneCountInString(text), keyCopySel))
 		}
 		return true
 	}

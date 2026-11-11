@@ -32,7 +32,7 @@ func editKeys(km *textarea.KeyMap) {
 	km.DeleteWordForward = key.NewBinding(key.WithKeys("alt+delete", "alt+d", "ctrl+delete"))
 }
 
-// selectAllKey implements select-all for a textbox: the whole text is highlighted and copied;
+// selectAllKey implements select-all for a textbox: the whole text is highlighted (not copied);
 // typing or pasting replaces it, Backspace/Delete removes it, a cursor key just deselects.
 func (m *Model) selectAllKey(b *textarea.Model, k tea.KeyMsg) (bool, tea.Cmd) {
 	s := k.String()
@@ -41,9 +41,7 @@ func (m *Model) selectAllKey(b *textarea.Model, k tea.KeyMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		m.selAllBox = b
-		if err := copyText(b.Value()); err == nil {
-			m.setStatus(fmt.Sprintf("Selected all (%d characters, copied). Type to replace, Backspace to cut.", utf8.RuneCountInString(b.Value())))
-		}
+		m.setStatus(fmt.Sprintf("Selected all (%d characters). %s to copy, type to replace, Backspace to cut.", utf8.RuneCountInString(b.Value()), keyCopySel))
 		return true, nil
 	}
 	if m.selAllBox != b {

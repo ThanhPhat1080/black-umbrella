@@ -785,7 +785,7 @@ func rowOf(view, needle string) string {
 func TestSelectionDoesNotHideMessagesBelow(t *testing.T) {
 	m, me, bob := newTestModel(t)
 	fillTimeline(t, m, me, bob, 7)
-	m.Update(tea.WindowSizeMsg{Width: 120, Height: 35})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 50})
 	press(m, tea.KeyUp)
 	press(m, tea.KeyUp)
 	if m.selMain != 5 {
@@ -957,27 +957,28 @@ func sideRows(m *Model) []string {
 	return rows
 }
 
-func TestSidebarOneLinePerUserWithSeparator(t *testing.T) {
+func TestSidebarSectionsAndUserGaps(t *testing.T) {
 	m := sidebarModel(t) // users: me (not listed), bob, zed
 	rows := sideRows(m)
-	var content []string
+	var plain []string
 	for _, r := range rows[1 : len(rows)-1] {
-		if p := strings.TrimSpace(strings.Trim(ansi.Strip(r), "│")); p != "" {
-			content = append(content, p)
+		plain = append(plain, strings.TrimSpace(strings.Trim(ansi.Strip(r), "│")))
+	}
+	idx := func(sub string) int {
+		for i, p := range plain {
+			if strings.Contains(p, sub) {
+				return i
+			}
 		}
+		t.Fatalf("%q not found in %q", sub, plain)
+		return -1
 	}
-	// Hell room, separator, bob, zed: exactly one line per user
-	if len(content) != 4 {
-		t.Fatalf("want 4 content rows, got %d: %q", len(content), content)
+	ch, hell, usr, bob, zed := idx("Channel"), idx("Hell room"), idx("User"), idx("Phát"), idx("Zed Zed")
+	if !(ch < hell && hell < usr && usr < bob && bob < zed) {
+		t.Fatalf("section order wrong: %q", plain)
 	}
-	if !strings.Contains(content[0], "Hell room") || strings.Trim(content[1], "─") != "" {
-		t.Fatalf("separator missing under Hell room: %q", content)
-	}
-	if !strings.Contains(content[2], "Phát") || !strings.Contains(content[3], "Zed Zed") {
-		t.Fatalf("user rows: %q", content)
-	}
-	if w := width(strings.Trim(ansi.Strip(rows[2]), "│")); w != 22 {
-		t.Fatalf("separator width %d, want 22", w)
+	if zed-bob < 2 || plain[bob+1] != "" {
+		t.Fatalf("want a blank row between users: %q", plain)
 	}
 }
 
@@ -1427,8 +1428,12 @@ func TestDragSelectCopiesText(t *testing.T) {
 	m.Update(tea.MouseMsg{X: col + 4, Y: row, Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft})
 	m.View()
 	m.Update(tea.MouseMsg{X: col + 4, Y: row, Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft})
+	if len(copied) != 0 {
+		t.Fatalf("selecting must not copy by itself: %q", copied)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
 	if len(copied) != 1 || copied[0] != "hello" {
-		t.Fatalf("copied %q", copied)
+		t.Fatalf("Ctrl+Y copied %q", copied)
 	}
 	// a plain click (no drag) copies nothing
 	m.Update(tea.MouseMsg{X: col, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
@@ -1502,9 +1507,13 @@ func TestTextboxWordJumpHomeEndAndSelectAll(t *testing.T) {
 		t.Fatalf("home/end: %q", v)
 	}
 
-	typ("ctrl+l") // select all: copies, highlights
-	if len(copied) != 1 || copied[0] != "<hello 2big3 1world>" || m.selAllBox != &m.input {
+	typ("ctrl+l") // select all: highlights, does not copy
+	if len(copied) != 0 || m.selAllBox != &m.input {
 		t.Fatalf("select all: copied=%q sel=%v", copied, m.selAllBox != nil)
+	}
+	typ("ctrl+y") // explicit copy
+	if len(copied) != 1 || copied[0] != "<hello 2big3 1world>" {
+		t.Fatalf("Ctrl+Y: copied=%q", copied)
 	}
 	m.View() // renders the highlighted box without panicking
 	typ("n") // typing replaces

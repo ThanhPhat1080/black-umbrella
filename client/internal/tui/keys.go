@@ -18,6 +18,7 @@ const (
 	keyOpen      = "o"
 	keyCopyMsg   = "c"
 	keySelect    = "ctrl+x"
+	keyCopySel   = "ctrl+y" // copy the current text selection (selecting never copies by itself)
 	maxInputRune = 4000
 )
 
@@ -30,7 +31,8 @@ var helpEntries = [][2]string{
 	{"Ctrl+← / Ctrl+→", "jump a word (also Option+← / →)"},
 	{"Home / End", "line start / end (Ctrl+E also = end)"},
 	{"Ctrl+W / Ctrl+U", "delete word / delete to line start"},
-	{selectAllHelpKey(), "select all in the textbox (copies it)"},
+	{selectAllHelpKey(), "select all in the textbox (Ctrl+Y copies it)"},
+	{keyCopySel, "copy the selected text (selecting never copies by itself)"},
 	{"Tab", "switch input / message list (main ⇄ thread box)"},
 	{"Ctrl+N / Ctrl+P", "next / previous conversation"},
 	{"Esc", "back to the input / close thread"},
@@ -47,12 +49,16 @@ var helpEntries = [][2]string{
 	{"Ctrl+X", "select mode: let the terminal select"},
 	{"", ""},
 	{"/buzz", "shake everyone's screen"},
+	{"/dance", "a surprise animal dances for everyone"},
+	{"/cow [text]", "send an ASCII cow (saying text)"},
+	{"/e", "hide / show the sidebar pet"},
 	{"/i", "kaomoji picker"},
 	{"/iam", "show who you are"},
 	{"/whois @user", "show a profile"},
 	{"/name <name>", "change your display name"},
 	{"/h", "this help"},
-	{"/quit, Ctrl+C", "quit"},
+	{"/quit", "quit now"},
+	{"Ctrl+C", "quit (asks to confirm; press again or y/Enter)"},
 }
 
 func selectAllHelpKey() string {

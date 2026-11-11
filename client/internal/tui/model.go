@@ -12,9 +12,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	zone "github.com/lrstanley/bubblezone"
 
 	"github.com/ThanhPhat1080/black-umbrella/client/internal/api"
@@ -41,6 +43,7 @@ const (
 	overlayPicker
 	overlayProfile
 	overlayHelp
+	overlayQuit // "quit?" confirmation after Ctrl+C
 )
 
 const (
@@ -110,9 +113,12 @@ type Model struct {
 	reconnecting bool
 	lastTyping   time.Time
 	buzz         buzzState
+	dance        danceState
+	petOff       bool // /e hides the sidebar pet
 	refN         int
 	pending      map[string]*pendingSend
 	retry        []*pendingSend
+	curOut       *cursorOut // real-cursor placement for input methods (nil in tests)
 }
 
 // Run starts the UI and blocks until the user quits.
@@ -120,8 +126,10 @@ func Run(ctx context.Context, conn *api.Conn, st *chat.State, kp e2e.KeyPair, re
 	zone.NewGlobal()
 	defer zone.Close()
 	m := NewModel(ctx, conn, st, kp, reconnect)
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
+	m.curOut = &cursorOut{File: os.Stdout}
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx), tea.WithOutput(m.curOut))
 	_, err := p.Run()
+	m.curOut.reset()
 	m.conn.Close()
 	return err
 }
@@ -129,21 +137,27 @@ func Run(ctx context.Context, conn *api.Conn, st *chat.State, kp e2e.KeyPair, re
 func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, reconnect func(context.Context) (*api.Conn, error)) *Model {
 	ta := textarea.New()
 	ta.Prompt = ""
+	ta.FocusedStyle.CursorLine = lipgloss.NewStyle() // no own background: the box paints one
+	ta.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	ta.ShowLineNumbers = false
 	ta.CharLimit = maxInputRune
 	ta.SetHeight(3)
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
 	editKeys(&ta.KeyMap)
 	ta.Placeholder = "Message… (/i for kaomoji)"
+	ta.Cursor.SetMode(cursor.CursorStatic) // never blink, so the cursor cell is always drawn
 	ta.Focus()
 	tb := textarea.New()
 	tb.Prompt = ""
+	tb.FocusedStyle.CursorLine = lipgloss.NewStyle() // no own background: the box paints one
+	tb.BlurredStyle.CursorLine = lipgloss.NewStyle()
 	tb.ShowLineNumbers = false
 	tb.CharLimit = maxInputRune
 	tb.SetHeight(3)
 	tb.KeyMap.InsertNewline = ta.KeyMap.InsertNewline
 	editKeys(&tb.KeyMap)
 	tb.Placeholder = "Reply in thread…"
+	tb.Cursor.SetMode(cursor.CursorStatic)
 	tb.Blur()
 	return &Model{tinput: tb, ctx: ctx, conn: conn, st: st, kp: kp, reconnect: reconnect, input: ta,
 		selMain: -1, selThread: -1, pinMain: true, pinThr: true, pending: map[string]*pendingSend{}, w: 0, h: 0}
@@ -153,7 +167,9 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, waitEvent(m.conn), tick())
 }
 
-func tick() tea.Cmd { return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) }) }
+func tick() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
 
 func waitEvent(c link) tea.Cmd {
 	return func() tea.Msg {
@@ -246,7 +262,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tick()
 	case buzzTickMsg:
-		return m, m.buzz.next(time.Now())
+		return m, tea.Batch(m.buzz.next(time.Now()), m.dance.next(time.Now()))
 	case eventMsg:
 		if msg.conn != m.conn {
 			return m, nil
@@ -329,6 +345,9 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	}
 	if fx.Buzz && ev.Message != nil && ev.Message.Conv == m.st.Active() {
 		cmds = append(cmds, m.buzz.begin(ev.Message.ID, time.Now()))
+	}
+	if fx.Dance && ev.Message != nil && ev.Message.Conv == m.st.Active() {
+		cmds = append(cmds, m.dance.begin(ev.Message.ID, time.Now()))
 	}
 	switch ev.T {
 	case "hello", "user":
@@ -534,14 +553,43 @@ func (m *Model) onKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	s := k.String()
+	if m.overlay == overlayQuit { // Ctrl+C again, y or Enter confirms; any other key stays
+		if s == keyQuit || s == "y" || s == "Y" || s == keyEnter {
+			return m, tea.Quit
+		}
+		m.overlay = overlayNone
+		return m, nil
+	}
 	if s == keyQuit {
-		return m, tea.Quit
+		if m.fatal != "" { // nothing left to lose: the connection is gone
+			return m, tea.Quit
+		}
+		m.overlay = overlayQuit
+		return m, nil
 	}
 	switch m.overlay {
 	case overlayPicker:
 		return m.pickerKey(s)
 	case overlayProfile, overlayHelp:
 		m.overlay = overlayNone
+		return m, nil
+	}
+	if s == keyCopySel {
+		text := ""
+		switch {
+		case m.drag.shown:
+			text = m.selectedText()
+		case m.selAllBox != nil:
+			text = m.selAllBox.Value()
+		}
+		switch {
+		case text == "":
+			m.setStatus("Nothing selected.")
+		case copyText(text) != nil:
+			m.setStatus("Could not copy.")
+		default:
+			m.setStatus(fmt.Sprintf("Copied %d characters.", utf8.RuneCountInString(text)))
+		}
 		return m, nil
 	}
 	m.drag.shown = false
@@ -798,6 +846,16 @@ func (m *Model) submit() tea.Cmd {
 	return nil
 }
 
+// sendHere sends text to the open conversation, into the thread when the thread box has focus.
+func (m *Model) sendHere(text string) bool {
+	thread := m.pane == paneThreadInput
+	parent := ""
+	if thread {
+		parent = m.threadRoot
+	}
+	return m.send(&pendingSend{fromThread: thread, conv: m.st.Active(), parent: parent, text: text})
+}
+
 func (m *Model) command(text string) tea.Cmd {
 	fields := strings.Fields(text)
 	arg := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
@@ -817,6 +875,27 @@ func (m *Model) command(text string) tea.Cmd {
 		if m.send(&pendingSend{fromThread: thread, conv: m.st.Active(), parent: parent, text: chat.BuzzText}) {
 			m.buzz.sent = time.Now()
 			m.box().Reset()
+		}
+	case "/dance":
+		if wait := danceCooldown - time.Since(m.dance.sent); wait > 0 {
+			m.setStatus(fmt.Sprintf("Easy! You can dance again in %ds.", int(wait.Seconds())+1))
+			return nil
+		}
+		if m.sendHere(chat.DanceText) {
+			m.dance.sent = time.Now()
+			m.box().Reset()
+		}
+	case "/cow":
+		if m.sendHere(chat.Art(cowArt(arg))) {
+			m.box().Reset()
+		}
+	case "/e":
+		m.petOff = !m.petOff
+		m.box().Reset()
+		if m.petOff {
+			m.setStatus("Pet hidden. /e shows it again.")
+		} else {
+			m.setStatus("Pet is back!")
 		}
 	case "/i":
 		m.box().Reset()

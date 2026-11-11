@@ -19,6 +19,8 @@ const (
 	// BuzzText is the body of a buzz message. It travels as ordinary encrypted text, so the
 	// server needs no changes and older clients just show "/buzz".
 	BuzzText = "/buzz"
+	// DanceText is the body of a /dance message; like a buzz it is plain encrypted text.
+	DanceText = "/dance"
 )
 
 type Msg struct {
@@ -28,7 +30,7 @@ type Msg struct {
 	Replies                          int
 }
 
-type Effects struct{ Bell, Buzz bool }
+type Effects struct{ Bell, Buzz, Dance bool }
 
 type Entry struct {
 	Conv, Label, Username string
@@ -150,6 +152,7 @@ func (s *State) Apply(ev proto.Event) Effects {
 		}
 		s.msgs[m.ID] = m
 		fx.Buzz = m.Text == BuzzText && !m.Undecryptable
+		fx.Dance = m.Text == DanceText && !m.Undecryptable
 		if m.Sender == s.me {
 			break
 		}
@@ -356,4 +359,16 @@ func cleanUser(u proto.User) proto.User {
 	u.Username = SanitizeLine(u.Username)
 	u.DisplayName = SanitizeLine(u.DisplayName)
 	return u
+}
+
+// Art wraps pre-formatted text (ASCII art) in a fenced block; clients draw it without
+// re-wrapping or trimming, older ones just show the fences.
+func Art(body string) string { return "```\n" + body + "\n```" }
+
+// Preformatted returns the body of a fenced art message.
+func Preformatted(text string) (string, bool) {
+	if strings.HasPrefix(text, "```\n") && strings.HasSuffix(text, "\n```") && len(text) >= 8 {
+		return text[4 : len(text)-4], true
+	}
+	return "", false
 }

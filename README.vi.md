@@ -203,7 +203,7 @@ Thoát: gõ `/quit` hoặc bấm `Ctrl+C`.
 | `→` | mở thread của tin đang chọn và chuyển focus sang panel thread |
 | `←` hoặc `Esc` | đóng thread, quay về danh sách tin với tin đó vẫn đang được chọn |
 | `Esc` | (khi không mở thread) đóng bảng kaomoji / profile, quay về ô nhập |
-| `Ctrl+C` | thoát |
+| `Ctrl+C` | thoát (hỏi xác nhận: bấm `Ctrl+C` lần nữa, hoặc `y`/`Enter`) |
 
 Soạn tin trong ô nhập: `Ctrl+←/→` hoặc `Option+←/→` nhảy theo từ, `Home`/`End` (hoặc `Ctrl+E` về cuối dòng; trên macOS `Ctrl+A` về đầu dòng) về đầu/cuối dòng, `Ctrl+W` xoá một từ, `Ctrl+U` xoá đến đầu dòng, **`Ctrl+L`** (hoặc `Alt+A`; trên **Windows và Linux dùng được cả `Ctrl+A`**) chọn tất cả và copy luôn (gõ chữ để thay thế, `Backspace` để cắt). Trên Windows/Linux không cần cấu hình gì thêm. Trên Mac, terminal không bao giờ gửi phím Cmd cho ứng dụng, nên `Cmd+A`, `Cmd+←` do terminal xử lý. Trên iTerm2, vào Settings → Profiles → Keys → Key Mappings, chọn "Send Hex Code" rồi gán: `Cmd+A` → `0x0c`, `Cmd+←` → `0x01`, `Cmd+→` → `0x05`, `Cmd+Backspace` → `0x15`.
 
@@ -217,6 +217,9 @@ Khi đang ở danh sách tin, cứ gõ chữ bình thường — app tự đưa 
 |---|---|
 | `/i` | mở bảng chọn kaomoji |
 | `/whois @username` | xem profile của một người |
+| `/dance` | một con vật bất ngờ nhảy múa cho mọi người xem |
+| `/cow [chữ]` | gửi hình con bò ASCII (nói câu bạn gõ) |
+| `/e` | ẩn / hiện con mèo ở sidebar |
 | `/name Tên mới` | đổi display name của bạn |
 | `/quit` | thoát |
 

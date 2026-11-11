@@ -20,6 +20,7 @@ import (
 
 var (
 	dim       = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	artSt     = lipgloss.NewStyle().Foreground(lipgloss.Color("223"))
 	accent    = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	keptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true)
 	mentionSt = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
@@ -240,6 +241,7 @@ type msgView struct {
 	InThread bool // replies in the thread panel get no 💬 button
 	Online   bool // sender's presence, shown as the dot in the header
 	Buzz     buzzAnim
+	Dance    buzzAnim
 }
 
 func presenceDot(online bool) string {
@@ -265,6 +267,11 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 		}()
 	}
 	own := v.Me != "" && m.Sender == v.Me
+	_, isArt := chat.Preformatted(m.Text)
+	// ASCII art and /dance are drawn as a block in the middle of the pane, whoever sent them.
+	special := !m.Undecryptable && (isArt || m.Text == chat.DanceText)
+	flush := own && !special
+	bodyN := 0 // number of body lines (set once the body is drawn)
 	dot := zone.Mark("av:"+m.ID, presenceDot(v.Online))
 	stamp := dim.Render(m.CreatedAt.Local().Format("15:04"))
 	name := nameStyle(m.Sender).Render(v.Name)
@@ -281,13 +288,28 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	defer func() {
 		// Own messages hug the right edge (block right-aligned, text left-aligned inside).
 		pad := 0
-		if own {
+		if flush {
 			mw := 0
 			for _, l := range lines {
 				mw = maxInt(mw, width(l))
 			}
 			pad = maxInt(0, v.Width-2-mw)
-			lines[0] = strings.Repeat(" ", maxInt(0, mw-width(lines[0]))) + lines[0] // header flush right
+			for i := range lines { // header, text and buttons all flush right
+				lines[i] = strings.Repeat(" ", maxInt(0, mw-width(lines[i]))) + lines[i]
+			}
+		}
+		if special && own { // our header hugs the right edge, theirs stays left
+			lines[0] = strings.Repeat(" ", maxInt(0, v.Width-2-width(lines[0]))) + lines[0]
+		}
+		if special && bodyN > 0 { // the art itself is centred
+			mw := 0
+			for _, l := range lines[1 : 1+bodyN] {
+				mw = maxInt(mw, width(l))
+			}
+			mid := maxInt(0, (v.Width-1-mw)/2)
+			for i := 1; i <= bodyN; i++ {
+				lines[i] = strings.Repeat(" ", mid) + lines[i]
+			}
 		}
 		for i := range lines {
 			lines[i] = prefix + strings.Repeat(" ", pad) + lines[i]
@@ -298,7 +320,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	if textW < 1 {
 		textW = 1
 	}
-	if own && v.Width > 40 {
+	if flush && v.Width > 40 {
 		textW = minInt(textW, maxInt(20, v.Width*7/10)) // own messages wrap narrower so they sit visibly right
 	}
 	isBuzz := m.Text == chat.BuzzText && !m.Undecryptable
@@ -306,20 +328,29 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	if isBuzz {
 		text = fmt.Sprintf(buzzFmt, v.Name)
 	}
-	body := wrapText(text, textW)
-	lt := newLinkTracker(text)
-	off := 0
-	for i := range body {
-		s := body[i]
-		if isBuzz {
-			s = styleBuzz(s, off, v.Buzz)
-			off += utf8.RuneCountInString(body[i])
-		} else if m.Undecryptable {
-			s = dim.Render(s)
-		} else {
-			s = styleBodyZ(s, v.Me, m.ID, lt.spans(s))
+	var body []string
+	if art, ok := chat.Preformatted(m.Text); ok && !m.Undecryptable { // ASCII art: keep every space
+		for _, l := range strings.Split(art, "\n") {
+			body = append(body, artSt.Render(cut(strings.TrimRight(l, "\r"), textW)))
 		}
-		body[i] = s
+	} else if m.Text == chat.DanceText && !m.Undecryptable {
+		body = danceBody(m.ID, v.Name, v.Dance)
+	} else {
+		body = wrapText(text, textW)
+		lt := newLinkTracker(text)
+		off := 0
+		for i := range body {
+			s := body[i]
+			if isBuzz {
+				s = styleBuzz(s, off, v.Buzz)
+				off += utf8.RuneCountInString(body[i])
+			} else if m.Undecryptable {
+				s = dim.Render(s)
+			} else {
+				s = styleBodyZ(s, v.Me, m.ID, lt.spans(s))
+			}
+			body[i] = s
+		}
 	}
 
 	var btns []string
@@ -343,21 +374,15 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 		}
 		btns = append(btns, zone.Mark("thr:"+m.ID, label))
 	}
-	btnStr := strings.Join(btns, "")
-	btnW := width(btnStr)
-
-	last := ""
-	if n := len(body); n > 0 {
-		last = body[n-1]
+	if special { // art and dances have no copy / keep / thread buttons
+		btns = nil
 	}
-	for i, b := range body {
-		if i == len(body)-1 && width(b)+2+btnW <= v.Width-3 {
-			b += "  " + btnStr
-			btnStr = ""
-		}
+	btnStr := strings.Join(btns, "")
+
+	for _, b := range body {
 		lines = append(lines, "  "+b)
 	}
-	_ = last
+	bodyN = len(body)
 	if btnStr != "" {
 		lines = append(lines, "  "+btnStr)
 	}
@@ -557,6 +582,8 @@ func (m *Model) convTitle(conv string) string {
 // Row backgrounds: a subtle accent, readable on dark and light terminals.
 var (
 	activeBg = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#2a3b5c", Light: "#dbe6ff"})
+	inputCol = lipgloss.AdaptiveColor{Dark: "#000000", Light: "#e2e2e8"}
+	inputBg  = lipgloss.NewStyle().Background(inputCol)
 	selectBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#232f47", Light: "#e8eefc"})
 )
 
@@ -578,7 +605,18 @@ func (m *Model) viewSidebar(w, h int) string {
 	active := m.st.Active()
 	var lines []string
 	activeLine := 0
+	section := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("244")).Faint(true)
+	lines = append(lines, section.Render("Channel"))
+	firstUser := true
 	for _, e := range m.st.Sidebar() {
+		if e.Conv != "hell" {
+			if firstUser {
+				lines = append(lines, dim.Render(" "+strings.Repeat("─", maxInt(1, inner-2))), section.Render("User"), "")
+				firstUser = false
+			} else {
+				lines = append(lines, "") // vertical gap between users
+			}
+		}
 		badge, badgeW := "", 0
 		if e.Unread > 0 {
 			n := fmt.Sprintf("%d", e.Unread)
@@ -614,25 +652,60 @@ func (m *Model) viewSidebar(w, h int) string {
 			row = bgFill(row, inner, activeBg)
 		}
 		lines = append(lines, row)
-		if e.Conv == "hell" {
-			lines = append(lines, dim.Render(strings.Repeat("─", inner)))
-		}
 	}
+	pet := m.petLines(inner, h-2)
+	listH := h - 2 - len(pet)
 	off := 0
-	if activeLine >= h-2 {
-		off = activeLine - (h - 2) + 1
+	if activeLine >= listH { // many users: the list scrolls, the pet stays put
+		off = activeLine - listH + 1
 	}
-	return paneBox(fit(lines[minInt(off, len(lines)):], inner, h-2), inner, false)
+	list := fit(lines[minInt(off, len(lines)):], inner, listH)
+	if len(pet) > 0 {
+		list += "\n" + strings.Join(pet, "\n")
+	}
+	return paneBox(list, inner, false)
+}
+
+// petFrames is a little dancing cat, 11 cells wide.
+var petFrames = [4][3]string{
+	{`  /\_/\  ♪`, ` ( ^.^ )/  `, `  _/ \_    `},
+	{`♪ /\_/\    `, `\( ^o^ )   `, `   _/ \_   `},
+	{`  /\_/\ ♪  `, ` ( ^.^ )\  `, `  _/ \_/   `},
+	{` ♪/\_/\    `, ` ( ^o^ )/  `, `   \_/ \_  `},
+}
+
+// petLines is the dancing cat at the bottom of the sidebar (nil when the sidebar is too small).
+func (m *Model) petLines(inner, h int) []string {
+	const petW = 11
+	if m.petOff || inner < petW+2 || h < 16 {
+		return nil
+	}
+	f := petFrames[int(time.Now().UnixMilli()/500)%len(petFrames)]
+	pad := strings.Repeat(" ", (inner-petW)/2)
+	out := []string{""}
+	for _, l := range f {
+		out = append(out, pad+accent.Render(l))
+	}
+	return out
 }
 
 // paneBox draws a rounded border by hand (lipgloss would measure widths its own way).
 // content is lines already fitted to exactly innerW cells.
 func paneBox(content string, innerW int, focused bool) string {
+	return paneBoxBg(content, innerW, focused, nil)
+}
+
+// paneBoxBg is paneBox whose border cells also carry bg, so a filled box has no gaps: the
+// border glyphs only draw a thin line and would otherwise leave the terminal colour around it.
+func paneBoxBg(content string, innerW int, focused bool, bg lipgloss.TerminalColor) string {
 	c := lipgloss.Color("240")
 	if focused {
 		c = lipgloss.Color("39")
 	}
 	st := lipgloss.NewStyle().Foreground(c)
+	if bg != nil {
+		st = st.Background(bg)
+	}
 	var out []string
 	out = append(out, st.Render("╭"+strings.Repeat("─", innerW)+"╮"))
 	for _, l := range strings.Split(content, "\n") {
@@ -681,14 +754,14 @@ func (m *Model) viewChat(w, h int) string {
 		title += "  " + strings.Join(names, dim.Render(", ")) + dim.Italic(true).Render(" is typing…")
 	}
 	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
-	bodyH := h - 2 - 1 - inH
+	bodyH := h - 2 - 1 - inH - 1    // one blank row keeps the text off the textbox
 	if bodyH < 1 {
 		bodyH = 1
 	}
 	var blocks [][]string
 	online := m.isOnline()
 	for i, msg := range m.st.Timeline(conv) {
-		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now())}))
+		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now()), Dance: m.dance.anim(msg.ID, time.Now())}))
 	}
 	blocks = spaced(blocks)
 	sel := -1
@@ -697,6 +770,7 @@ func (m *Model) viewChat(w, h int) string {
 	}
 	lines := []string{title}
 	lines = append(lines, window(blocks, sel, bodyH, &m.topMain, &m.pinMain)...)
+	lines = append(lines, "")
 	n := utf8.RuneCountInString(m.input.Value())
 	counter := dim.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
 	if n > maxInputRune-200 {
@@ -706,10 +780,10 @@ func (m *Model) viewChat(w, h int) string {
 	foot := plus + dim.Render(" kaomoji  ") + counter
 	var boxed []string
 	for _, l := range strings.Split(m.boxView(&m.input), "\n") {
-		boxed = append(boxed, " "+l)
+		boxed = append(boxed, bgFill(" "+l, inner-2, inputBg))
 	}
 	// The whole box (border included) is one click zone that focuses the input.
-	box := paneBox(fit(boxed, inner-2, m.input.Height()), inner-2, m.pane == paneInput)
+	box := paneBoxBg(fit(boxed, inner-2, m.input.Height()), inner-2, m.pane == paneInput, inputCol)
 	lines = append(lines, strings.Split(zone.Mark("input", box), "\n")...)
 	lines = append(lines, foot)
 	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput)
@@ -740,13 +814,14 @@ func (m *Model) viewThread(w, h int) string {
 	}
 	lines := []string{nameSt.Render("Thread") + dim.Render("  (Esc to close)")}
 	boxH := m.tinput.Height() + 2 + 1 // text lines + borders + counter line
-	bodyH := maxInt(1, h-2-1-boxH)
+	bodyH := maxInt(1, h-2-1-boxH-1)
 	lines = append(lines, window(blocks, bsel, bodyH, &m.topThr, &m.pinThr)...)
+	lines = append(lines, "")
 	var boxed []string
 	for _, l := range strings.Split(m.boxView(&m.tinput), "\n") {
-		boxed = append(boxed, " "+l)
+		boxed = append(boxed, bgFill(" "+l, inner-2, inputBg))
 	}
-	box := paneBox(fit(boxed, inner-2, m.tinput.Height()), inner-2, m.pane == paneThreadInput)
+	box := paneBoxBg(fit(boxed, inner-2, m.tinput.Height()), inner-2, m.pane == paneThreadInput, inputCol)
 	lines = append(lines, strings.Split(zone.Mark("tinput", box), "\n")...)
 	n := utf8.RuneCountInString(m.tinput.Value())
 	counter := dim.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
@@ -796,6 +871,10 @@ func (m *Model) overlayView() []string {
 			}
 			lines = append(lines, sb.String())
 		}
+	case overlayQuit:
+		lines = append(lines, nameSt.Render("Quit Umbrella?"), "",
+			accent.Render("Ctrl+C")+dim.Render(" / ")+accent.Render("y")+dim.Render(" / ")+accent.Render("Enter")+"  quit",
+			dim.Render("any other key  stay"))
 	case overlayHelp:
 		lines = append(lines, nameSt.Render("Shortcuts")+dim.Render("  press any key to close"), "")
 		for _, e := range helpEntries {
@@ -860,6 +939,7 @@ func overlayOn(bg, box []string, w, h int) []string {
 
 func (m *Model) View() string {
 	if m.w == 0 || m.h == 0 {
+		m.curOut.set(0, 0, false)
 		return ""
 	}
 	sideW, chatW, threadW := m.layout()
@@ -892,6 +972,7 @@ func (m *Model) View() string {
 		lines[i] = padTo(l, m.w)
 		m.screen = append(m.screen, ansi.Strip(lines[i]))
 	}
+	m.placeCursor(lines)
 	m.highlight(lines)
 	return strings.Join(lines, "\n")
 }

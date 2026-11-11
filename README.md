@@ -110,7 +110,8 @@ on any proxy you put in front of the Worker.
 | r or Right | open the selected message's thread (Right also focuses the thread reply textbox) |
 | Left or Esc | with a thread open: close it and return to the message list with the same message selected |
 | Esc | message list without a thread / picker: return to the input |
-| Ctrl+C or /quit | quit |
+| Ctrl+C | quit (asks to confirm: press Ctrl+C again, or y/Enter) |
+| /quit | quit immediately |
 
 Textbox editing: Ctrl+←/→ or Option+←/→ jump a word, Home/End (or Ctrl+E for the end; Ctrl+A for the start on macOS) go to the line start/end,
 Ctrl+W deletes a word, Ctrl+U deletes to the line start, **Ctrl+L** (or Alt+A; also **Ctrl+A on Windows and Linux**) selects all text and copies it
@@ -120,7 +121,7 @@ terminal itself: in iTerm2 map them under Settings → Profiles → Keys → Key
 
 Text selection: while the app has the mouse, most terminals still let you bypass it by holding Shift (Windows Terminal, GNOME Terminal, Konsole) or Option ⌥ (iTerm2) while dragging; or use Ctrl+X select mode above.
 
-Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/quit`.
+Commands: `/i` kaomoji picker (also the `[+]` button), `/whois @user`, `/name <display name>`, `/buzz` shake everyone's screen, `/dance` a surprise animal dances for everyone, `/cow [text]` send an ASCII cow, `/e` hide/show the sidebar pet, `/quit`.
 Mouse: click conversations, avatars, `[+]`, and the `[📋]` `[⚓]` `[💬]` buttons on messages.
 
 ## Tests
