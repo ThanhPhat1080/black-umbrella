@@ -150,3 +150,49 @@ func TestCowsayBubbles(t *testing.T) {
 		}
 	}
 }
+
+func TestTalkingAnimalsSayTheText(t *testing.T) {
+	for _, kind := range []string{"cat", "rabbit", "dog", "duck"} {
+		art, ok := talkArt(kind, "xin chào")
+		if !ok || !strings.Contains(art, "< xin chào >") || strings.Count(art, "\n") < 6 {
+			t.Fatalf("%s: ok=%v\n%s", kind, ok, art)
+		}
+		if def, _ := talkArt(kind, ""); !strings.Contains(def, talkers[kind].def) {
+			t.Fatalf("%s: empty text should say its default", kind)
+		}
+	}
+	if _, ok := talkArt("cow", "x"); ok {
+		t.Fatal("cow is not in the table")
+	}
+}
+
+func TestFishSwimForTenSecondsThenRest(t *testing.T) {
+	var d danceState
+	t0 := time.Now()
+	d.begin("f1", t0)
+	a, b := fishBody("bob", 40, d.anim("f1", t0.Add(time.Second))), fishBody("bob", 40, d.anim("f1", t0.Add(2*time.Second)))
+	if strings.Join(a, "\n") == strings.Join(b, "\n") {
+		t.Fatal("fish should move")
+	}
+	if !d.anim("f1", t0.Add(9*time.Second)).Active || d.anim("f1", t0.Add(11*time.Second)).Active {
+		t.Fatal("fish swim for about ten seconds")
+	}
+	if len(a) != 1+len(fishRows) {
+		t.Fatalf("rows = %d", len(a))
+	}
+}
+
+func TestBuzzAndDanceLastTenSeconds(t *testing.T) {
+	if buzzTextDur != 10*time.Second || danceDur != 10*time.Second {
+		t.Fatalf("buzz %v dance %v", buzzTextDur, danceDur)
+	}
+	var b buzzState
+	t0 := time.Now()
+	b.begin("x", t0)
+	if b.shake(t0.Add(6*time.Second+100*time.Millisecond)) == 0 {
+		t.Fatal("the screen should shake again in a later burst")
+	}
+	if b.shake(t0.Add(11*time.Second)) != 0 {
+		t.Fatal("no shake after ten seconds")
+	}
+}

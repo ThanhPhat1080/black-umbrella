@@ -126,6 +126,7 @@ type Model struct {
 	buzz         buzzState
 	nudge        nudgeState // gentle shake when someone mentions you
 	dance        danceState
+	fish         danceState
 	petOff       bool // /e hides the sidebar pet
 	refN         int
 	roomRefs     map[string]bool // refs of room commands awaiting a reply
@@ -343,7 +344,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		return m, tick()
 	case buzzTickMsg:
-		return m, tea.Batch(m.buzz.next(time.Now()), m.dance.next(time.Now()), m.nudge.next(time.Now()))
+		return m, m.animTick(time.Now())
 	case eventMsg:
 		if msg.conn != m.conn {
 			return m, nil
@@ -458,6 +459,9 @@ func (m *Model) onEvent(ev proto.Event) tea.Cmd {
 	}
 	if fx.Buzz && ev.Message != nil && ev.Message.Conv == m.st.Active() {
 		cmds = append(cmds, m.buzz.begin(ev.Message.ID, time.Now()))
+	}
+	if fx.Fish && ev.Message != nil && ev.Message.Conv == m.st.Active() {
+		cmds = append(cmds, m.fish.begin(ev.Message.ID, time.Now()))
 	}
 	if fx.Dance && ev.Message != nil && ev.Message.Conv == m.st.Active() {
 		cmds = append(cmds, m.dance.begin(ev.Message.ID, time.Now()))
@@ -1070,6 +1074,19 @@ func (m *Model) command(text string) tea.Cmd {
 		}
 	case "/cow":
 		if m.sendHere(chat.Art(cowArt(arg))) {
+			m.box().Reset()
+		}
+	case "/cat", "/rabbit", "/dog", "/duck":
+		if art, ok := talkArt(fields[0][1:], arg); ok && m.sendHere(chat.Art(art)) {
+			m.box().Reset()
+		}
+	case "/fish":
+		if wait := danceCooldown - time.Since(m.fish.sent); wait > 0 {
+			m.setStatus(fmt.Sprintf("Easy! You can send fish again in %ds.", int(wait.Seconds())+1))
+			return nil
+		}
+		if m.sendHere(chat.FishText) {
+			m.fish.sent = time.Now()
 			m.box().Reset()
 		}
 	case "/e":

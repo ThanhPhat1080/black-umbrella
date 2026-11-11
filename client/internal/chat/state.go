@@ -21,6 +21,8 @@ const (
 	BuzzText = "/buzz"
 	// DanceText is the body of a /dance message; like a buzz it is plain encrypted text.
 	DanceText = "/dance"
+	// FishText is the body of a /fish message: a school of fish swims across the chat.
+	FishText = "/fish"
 )
 
 type Msg struct {
@@ -31,9 +33,9 @@ type Msg struct {
 }
 
 type Effects struct {
-	Bell, Buzz, Dance bool
-	Status            string // a line worth showing the user (e.g. "Bob added you to Dev")
-	Gone              string // a room conversation that just disappeared
+	Bell, Buzz, Dance, Fish bool
+	Status                  string // a line worth showing the user (e.g. "Bob added you to Dev")
+	Gone                    string // a room conversation that just disappeared
 }
 
 type Entry struct {
@@ -179,6 +181,7 @@ func (s *State) Apply(ev proto.Event) Effects {
 		s.msgs[m.ID] = m
 		fx.Buzz = m.Text == BuzzText && !m.Undecryptable
 		fx.Dance = m.Text == DanceText && !m.Undecryptable
+		fx.Fish = m.Text == FishText && !m.Undecryptable
 		if m.Sender == s.me {
 			break
 		}

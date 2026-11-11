@@ -7,11 +7,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
 const (
-	danceDur      = 4 * time.Second
+	danceDur      = 10 * time.Second // dances and fish keep going for ten seconds
 	danceStep     = 300 * time.Millisecond
 	danceCooldown = 10 * time.Second
 	maxCowText    = 40
@@ -85,12 +86,12 @@ func (d *danceState) anim(id string, now time.Time) buzzAnim {
 	return buzzAnim{Active: true, Elapsed: now.Sub(d.start)}
 }
 
-// cowArt draws a cow saying text, like cowsay: the text is wrapped at maxCowText columns and
-// put in a speech bubble ( < > for one line, / \ | | \ / for several ).
-func cowArt(text string) string {
+// bubble wraps text at maxCowText columns into a cowsay speech bubble ( < > for one line,
+// / \ | | \ / for several); an empty text says def.
+func bubble(text, def string) string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
-		words = []string{"Moo!"}
+		words = []string{def}
 	}
 	var lines []string
 	cur := ""
@@ -137,11 +138,107 @@ func cowArt(text string) string {
 		}
 		sb.WriteString(open + " " + runewidth.FillRight(l, w) + " " + close + "\n")
 	}
-	sb.WriteString(" " + strings.Repeat("-", w+2) + "\n")
+	sb.WriteString(" " + strings.Repeat("-", w+2))
+	return sb.String()
+}
+
+// cowArt draws a cow saying text, like cowsay.
+func cowArt(text string) string {
+	var sb strings.Builder
+	sb.WriteString(bubble(text, "Moo!") + "\n")
 	sb.WriteString(`        \   ^__^` + "\n")
 	sb.WriteString(`         \  (oo)\_______` + "\n")
 	sb.WriteString(`            (__)\       )\/\` + "\n")
 	sb.WriteString(`                ||----w |` + "\n")
 	sb.WriteString(`                ||     ||`)
 	return sb.String()
+}
+
+// animals that talk like the cow: the bubble, then the pointer lines and the body.
+var talkers = map[string]struct {
+	def  string
+	body []string
+}{
+	"cat": {"Meow!", []string{
+		`   \`,
+		`    \  /\_/\`,
+		`     \( o.o )`,
+		`       > ^ <`,
+	}},
+	"rabbit": {"Hop hop!", []string{
+		`   \`,
+		`    \  (\_/)`,
+		`     \ (o.o)`,
+		`       (> <)`,
+		`       (")_(")`,
+	}},
+	"dog": {"Woof!", []string{
+		`   \`,
+		`    \  ,-.___,-.`,
+		`     \ \_/_ _\_/`,
+		`        )O_O(`,
+		`       { (_) }`,
+		"        `-^-'",
+	}},
+	"duck": {"Quack!", []string{
+		`   \`,
+		`    \   __`,
+		`     \<(o )___`,
+		`        ( ._> /`,
+		"         `---'",
+	}},
+}
+
+// talkArt draws the named animal (cat, rabbit, dog, duck) saying text; ok is false for other names.
+func talkArt(kind, text string) (string, bool) {
+	t, ok := talkers[kind]
+	if !ok {
+		return "", false
+	}
+	return bubble(text, t.def) + "\n" + strings.Join(t.body, "\n"), true
+}
+
+// fishRows: how each row of the school swims; dir is the direction and step the cells per tick.
+var fishRows = []struct {
+	dir, speed int
+	starts     []int
+}{
+	{1, 1, []int{0, 11, 23}},
+	{-1, 2, []int{5, 17, 30}},
+	{1, 2, []int{9, 25, 36}},
+	{-1, 1, []int{2, 14, 28}},
+}
+
+var fishColors = []lipgloss.Color{"39", "45", "51", "81", "213"}
+
+const fishTick = 150 * time.Millisecond
+
+// fishBody draws the school of fish swimming through a tank width cells wide. Active animations
+// move them; at rest they stay where they started.
+func fishBody(name string, width int, anim buzzAnim) []string {
+	w := clampInt(width, 16, 44)
+	step := 0
+	if anim.Active {
+		step = int(anim.Elapsed / fishTick)
+	}
+	out := []string{accent.Render(fmt.Sprintf("🐟 %s sent a school of fish!", name))}
+	for r, row := range fishRows {
+		cells := make([]string, w)
+		for i := range cells {
+			cells[i] = " "
+		}
+		for k, s := range row.starts {
+			pos := ((s+row.dir*row.speed*step)%w + w) % w
+			shape := []rune("><>")
+			if row.dir < 0 {
+				shape = []rune("<><")
+			}
+			col := lipgloss.NewStyle().Foreground(fishColors[(r+k)%len(fishColors)])
+			for i, ch := range shape {
+				cells[(pos+i)%w] = col.Render(string(ch))
+			}
+		}
+		out = append(out, strings.Join(cells, ""))
+	}
+	return out
 }

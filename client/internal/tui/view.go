@@ -326,6 +326,7 @@ type msgView struct {
 	Online   bool // sender's presence, shown as the dot in the header
 	Buzz     buzzAnim
 	Dance    buzzAnim
+	Fish     buzzAnim
 	User     chipLookup // resolves @mentions to users (nil: mentions stay plain text)
 	Hover    string     // id of the click zone under the mouse
 }
@@ -355,7 +356,7 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 	own := v.Me != "" && m.Sender == v.Me
 	_, isArt := chat.Preformatted(m.Text)
 	// ASCII art and /dance are drawn as a block in the middle of the pane, whoever sent them.
-	special := !m.Undecryptable && (isArt || m.Text == chat.DanceText)
+	special := !m.Undecryptable && (isArt || m.Text == chat.DanceText || m.Text == chat.FishText)
 	flush := own && !special
 	bodyN := 0 // number of body lines (set once the body is drawn)
 	dot := zone.Mark("av:"+m.ID, presenceDot(v.Online))
@@ -425,6 +426,8 @@ func renderMessage(m chat.Msg, v msgView) (lines []string) {
 		}
 	} else if m.Text == chat.DanceText && !m.Undecryptable {
 		body = danceBody(m.ID, v.Name, v.Dance)
+	} else if m.Text == chat.FishText && !m.Undecryptable {
+		body = fishBody(v.Name, textW, v.Fish)
 	} else {
 		body = wrapText(chipText(text, v.User), textW)
 		lt := newLinkTracker(text)
@@ -970,7 +973,7 @@ func (m *Model) viewChat(w, h int) string {
 	var blocks [][]string
 	online := m.isOnline()
 	for i, msg := range m.st.Timeline(conv) {
-		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now()), Dance: m.dance.anim(msg.ID, time.Now()), User: m.chipLookup(), Hover: m.hover}))
+		blocks = append(blocks, renderMessage(msg, msgView{Name: m.nameOf(msg.Sender), Online: online(msg.Sender), Me: m.st.Me(), Width: inner, Selected: m.pane == paneMain && i == m.selMain, Buzz: m.buzz.anim(msg.ID, time.Now()), Dance: m.dance.anim(msg.ID, time.Now()), Fish: m.fish.anim(msg.ID, time.Now()), User: m.chipLookup(), Hover: m.hover}))
 	}
 	blocks = spaced(blocks)
 	sel := -1

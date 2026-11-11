@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.6.0 — 2026-11-11
+- Client: new talking animals like `/cow`: `/cat`, `/rabbit`, `/dog`, `/duck` (optionally followed by what they say).
+- Client: `/fish` sends a school of fish that swims across the chat.
+- Client: `/buzz` and `/dance` animations now last ten seconds (a buzz shakes the screen again every few seconds). Animation frames are scheduled by a single ticker and drawn at a lower rate when nothing shakes, which fixes lag during long animations.
+
 ## v1.5.2 — 2026-11-11
 - Client: pressing `↓` (or `j`) on the last message of the list, or the last reply of a thread, now moves focus down into the matching textbox.
 

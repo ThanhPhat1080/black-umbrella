@@ -12,9 +12,11 @@ import (
 const (
 	buzzFmt      = "⚡ ~~ %s buzzzz! (ﾉ°Д°)ﾉ ~~ ⚡"
 	buzzShakeDur = time.Second
-	buzzTextDur  = 2 * time.Second
+	buzzTextDur  = 10 * time.Second // the banner keeps its colour wave for ten seconds
+	buzzShakeGap = 6 * time.Second  // ...and the screen shakes again every few seconds meanwhile
 	buzzFrame    = 50 * time.Millisecond
 	buzzCooldown = 10 * time.Second
+	slowFrame    = 150 * time.Millisecond // frame time while nothing shakes
 )
 
 // Horizontal screen offsets, one per frame; the amplitude decays so the shake settles.
@@ -51,6 +53,20 @@ func buzzTick() tea.Cmd {
 	return tea.Tick(buzzFrame, func(time.Time) tea.Msg { return buzzTickMsg{} })
 }
 
+// animTick schedules the next animation frame, or nothing when every animation is over. There is
+// exactly one ticker chain: starting one per active animation would double the work every frame.
+// Frames come fast (50ms) only while the screen is shaking; colour waves, dancers and fish look
+// fine at a much lower rate, which keeps the terminal from lagging.
+func (m *Model) animTick(now time.Time) tea.Cmd {
+	if m.buzz.next(now) == nil && m.dance.next(now) == nil && m.fish.next(now) == nil && m.nudge.next(now) == nil {
+		return nil
+	}
+	if m.buzz.shake(now) != 0 || m.nudge.shake(now) != 0 {
+		return buzzTick()
+	}
+	return tea.Tick(slowFrame, func(time.Time) tea.Msg { return buzzTickMsg{} })
+}
+
 // next keeps the frame ticker going until the longest animation (the text) is over.
 func (b *buzzState) next(now time.Time) tea.Cmd {
 	if b.id != "" && now.Sub(b.start) < buzzTextDur {
@@ -72,7 +88,11 @@ func (b *buzzState) shake(now time.Time) int {
 		return 0
 	}
 	d := now.Sub(b.start)
-	if d < 0 || d >= buzzShakeDur {
+	if d < 0 || d >= buzzTextDur {
+		return 0
+	}
+	d %= buzzShakeGap
+	if d >= buzzShakeDur {
 		return 0
 	}
 	return shakeOffsets[int(d*time.Duration(len(shakeOffsets))/buzzShakeDur)]
