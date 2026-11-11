@@ -164,7 +164,7 @@ func NewModel(ctx context.Context, conn link, st *chat.State, kp e2e.KeyPair, re
 	ta.SetHeight(3)
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
 	editKeys(&ta.KeyMap)
-	ta.Placeholder = "Message… (/i for kaomoji)"
+	ta.Placeholder = ""                    // the hint lives in the line under the box: "[+] kaomoji  /h for shortcut"
 	ta.Cursor.SetMode(cursor.CursorStatic) // never blink, so the cursor cell is always drawn
 	ta.Focus()
 	tb := textarea.New()

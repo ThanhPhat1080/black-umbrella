@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.6.2 — 2026-11-12
+- Client: the textbox no longer shows the "Message… (/i for kaomoji)" placeholder; the line under it now reads `[+] kaomoji  /h for shortcut`, with the `0/4000` counter at the right edge.
+
 ## v1.6.1 — 2026-11-11
 - Client: the `/h` shortcuts list scrolls when it does not fit the screen (`↑/↓`, `PgUp/PgDn`, `Home/End`, mouse wheel); any other key still closes it.
 

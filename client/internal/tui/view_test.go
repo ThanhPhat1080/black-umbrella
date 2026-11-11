@@ -671,13 +671,13 @@ func TestInputBoxRendersBorderedAndFocusStyled(t *testing.T) {
 	plain := ansi.Strip(focused)
 	lines := strings.Split(plain, "\n")
 	var top int = -1
-	for i, l := range lines {
-		if strings.Contains(l, "Message") && strings.Contains(l, "│") && i > 0 && strings.Contains(lines[i-1], "╭") {
-			top = i - 1
+	for i, l := range lines { // the textbox: a box whose footer line is "[+] kaomoji …"
+		if i+5 < len(lines) && strings.Contains(l, "╭") && strings.Contains(lines[i+4], "╰") && strings.Contains(lines[i+5], "kaomoji") {
+			top = i
 		}
 	}
 	if top < 0 {
-		t.Fatalf("no bordered input with placeholder:\n%s", plain)
+		t.Fatalf("no bordered input above the [+] line:\n%s", plain)
 	}
 	if !strings.Contains(lines[top+4], "╰") || !strings.Contains(lines[top+5], "kaomoji") {
 		t.Fatalf("box must be 3 text lines, with the [+] line right below:\n%s", strings.Join(lines[top:top+6], "\n"))

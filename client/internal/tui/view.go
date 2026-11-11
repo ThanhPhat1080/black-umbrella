@@ -997,7 +997,13 @@ func (m *Model) viewChat(w, h int) string {
 		counter = errSt.Render(fmt.Sprintf("%d/%d", n, maxInputRune))
 	}
 	plus := zone.Mark("plus", accent.Render("[+]"))
-	foot := plus + dim.Render(" kaomoji  ") + counter
+	foot := plus + dim.Render(" kaomoji  /h for shortcut")
+	// the counter sits at the right edge, under the right border of the box
+	if gap := inner - 1 - lipgloss.Width(foot) - lipgloss.Width(counter); gap > 0 {
+		foot += strings.Repeat(" ", gap) + counter
+	} else {
+		foot += " " + counter
+	}
 	var boxed []string
 	for _, l := range strings.Split(m.boxView(&m.input), "\n") {
 		boxed = append(boxed, bgFill(" "+l, inner-2, inputBg))
