@@ -1663,3 +1663,21 @@ func TestSidebarFocusSelectsScrollsAndOpensChat(t *testing.T) {
 		t.Fatalf("Right should open %s and focus the box (active=%s pane=%v)", want, m.st.Active(), m.pane)
 	}
 }
+
+func TestDownOnLastMessageFocusesTheTextbox(t *testing.T) {
+	m, me, bob := newTestModel(t)
+	fillTimeline(t, m, me, bob, 5)
+	press(m, tea.KeyTab) // list, newest selected
+	if m.pane != paneMain {
+		t.Fatalf("pane=%v", m.pane)
+	}
+	press(m, tea.KeyUp)
+	press(m, tea.KeyDown) // back on the last message
+	if m.pane != paneMain {
+		t.Fatalf("pane=%v", m.pane)
+	}
+	press(m, tea.KeyDown) // past the last message
+	if m.pane != paneInput {
+		t.Fatalf("Down on the last message should focus the textbox, pane=%v", m.pane)
+	}
+}

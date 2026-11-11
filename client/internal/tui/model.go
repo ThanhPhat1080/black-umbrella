@@ -935,6 +935,10 @@ func (m *Model) listKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keyDown, "j":
 		if *sel < n-1 {
 			*sel++
+		} else if n > 0 && m.pane == paneThread { // already on the last reply: Down drops into its textbox
+			m.focusThreadInput()
+		} else if n > 0 {
+			m.focusInput()
 		}
 	case keyCopyLink:
 		if msg, ok := m.selectedMsg(); ok {

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.5.2 — 2026-11-11
+- Client: pressing `↓` (or `j`) on the last message of the list, or the last reply of a thread, now moves focus down into the matching textbox.
+
 ## v1.5.1 — 2026-11-11
 - Client: picking someone in the `@` mention popup now shows their display name in the textbox (`@Phát 🌂`); it is turned back into `@username` when the message is sent, so the wire format is unchanged.
 
