@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.0 — 2026-11-11
+- Client: Linux support for input methods (IBus, fcitx): the composition popup now appears at the textbox instead of the bottom-left corner of the terminal.
+- Client: `/cow [text]` sends an ASCII cow in a cowsay-style speech bubble (centred in the chat; no thread/keep buttons). `/dance` makes a surprise animal dance for everyone (10s cooldown); `/e` hides or shows the dancing cat at the bottom of the sidebar.
+- Client: Ctrl+C asks for confirmation before quitting (press it again, or `y`/Enter). `/quit` still quits at once.
+- Client: selecting text no longer copies by itself; press Ctrl+Y to copy the selection.
+- Client: darker textbox, a blank row between messages and the textbox, "Channel" / "User" sections with a separator and spacing in the sidebar (the user list scrolls), and the copy/keep/thread buttons sit under the text.
+
 ## v1.0.0 — 2026-11-10
 First stable release. Earlier 0.1.x releases were removed; their history is kept below.
 
