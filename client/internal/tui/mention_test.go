@@ -97,15 +97,19 @@ func TestMentionPopupListsUsersAndFilters(t *testing.T) {
 func TestMentionAcceptWithEnterAndTab(t *testing.T) {
 	m := mentionModel(t)
 	typeKeys(m, "h", "i", " ", "@", "b", "down", "up", "enter") // enter accepts, does not send
-	if m.input.Value() != "hi @bob " {
+	// the box shows the display name (non-breaking spaces); sending turns it back into @username
+	if m.input.Value() != "hi @Phát\u00a0🌂 " {
 		t.Fatalf("value %q", m.input.Value())
+	}
+	if got := m.expandMentions(m.input.Value()); got != "hi @bob " {
+		t.Fatalf("wire text %q", got)
 	}
 	if len(m.conn.(*fakeLink).sends()) != 0 {
 		t.Fatal("Enter must not send while the popup is open")
 	}
 	m.input.Reset()
 	typeKeys(m, "@", "down", "tab") // second candidate
-	if m.input.Value() != "@carol " {
+	if got := m.expandMentions(m.input.Value()); got != "@carol " {
 		t.Fatalf("value %q", m.input.Value())
 	}
 	typeKeys(m, "enter") // popup gone: now Enter sends

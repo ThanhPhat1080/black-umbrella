@@ -106,9 +106,10 @@ type Model struct {
 
 	overlay          overlay
 	pickIdx          int
-	sideSel, sideTop int // sidebar focus: selected entry and scroll offset (rows)
-	sideSeen         int // the line the sidebar last scrolled to, so wheel scrolling is not undone
-	memIdx, memTop   int // members modal: selected row and scroll offset
+	mentionNames     map[string]string // "@Display\u00a0Name" -> username for mentions picked in the textbox
+	sideSel, sideTop int               // sidebar focus: selected entry and scroll offset (rows)
+	sideSeen         int               // the line the sidebar last scrolled to, so wheel scrolling is not undone
+	memIdx, memTop   int               // members modal: selected row and scroll offset
 	profileUser      string
 
 	drag         dragSel
@@ -996,6 +997,7 @@ func (m *Model) submit() tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	text = m.expandMentions(text)
 	if strings.HasPrefix(text, "/") {
 		return m.command(text)
 	}

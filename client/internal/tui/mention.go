@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -150,12 +151,64 @@ func (m *Model) mentionKey(k tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 		for range []rune(query) {
 			*b, _ = b.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 		}
-		b.InsertString(cands[m.mentSel].user + " ")
+		c := cands[m.mentSel]
+		b.InsertString(m.mentionToken(c) + " ")
 		m.mentSel = 0
 	default:
 		return false, nil
 	}
 	return true, nil
+}
+
+// mentionToken is what a picked mention looks like in the textbox: the display name (spaces made
+// non-breaking so it wraps as one word), remembered so that sending turns it back into the
+// "@username" the wire format carries. Ambiguous or plain names stay as the username.
+func (m *Model) mentionToken(c mentionCand) string {
+	label := chipLabel(c.label)
+	if c.label == c.user || label == "" {
+		return c.user
+	}
+	for u := range m.st.Users() {
+		if u != c.user && chipLabel(m.st.DisplayName(u)) == label {
+			return c.user // two people share this name: be exact
+		}
+	}
+	if m.mentionNames == nil {
+		m.mentionNames = map[string]string{}
+	}
+	m.mentionNames["@"+label] = c.user
+	return label
+}
+
+// expandMentions rewrites the picked "@Display Name" tokens in text back to "@username".
+func (m *Model) expandMentions(text string) string {
+	toks := make([]string, 0, len(m.mentionNames))
+	for t := range m.mentionNames {
+		toks = append(toks, t)
+	}
+	sort.Slice(toks, func(i, j int) bool { return len(toks[i]) > len(toks[j]) })
+	for _, t := range toks {
+		var out strings.Builder
+		rest := text
+		for {
+			i := strings.Index(rest, t)
+			if i < 0 {
+				break
+			}
+			end := i + len(t)
+			next, _ := utf8.DecodeRuneInString(rest[end:])
+			okStart := i == 0 || unicode.IsSpace([]rune(rest[:i])[len([]rune(rest[:i]))-1])
+			if okStart && (end == len(rest) || !(unicode.IsLetter(next) || unicode.IsDigit(next) || next == '_')) {
+				out.WriteString(rest[:i] + "@" + m.mentionNames[t])
+			} else {
+				out.WriteString(rest[:end])
+			}
+			rest = rest[end:]
+		}
+		out.WriteString(rest)
+		text = out.String()
+	}
+	return text
 }
 
 // mentionTyped keeps the highlighted row sensible after the box changed.
