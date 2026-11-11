@@ -15,7 +15,7 @@
 **Quick update** (your key stays in `~/.umbrella/`, no need to register again; quit Umbrella first):
 - **macOS:** `sudo mv ~/Downloads/umbrella-darwin-arm64 /usr/local/bin/umbrella && sudo chmod +x /usr/local/bin/umbrella && sudo xattr -d com.apple.quarantine /usr/local/bin/umbrella` (use `amd64` on Intel)
 - **Linux:** `sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella`
-- **Windows (PowerShell):** `Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"`
+- **Windows (PowerShell):** `New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\umbrella" | Out-Null; Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"`
 
 Get an invite code from your admin, then run `umbrella register`, then `umbrella`.
 

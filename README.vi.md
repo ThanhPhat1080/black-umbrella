@@ -115,6 +115,7 @@ sudo install -m 755 ~/Downloads/umbrella-linux-amd64 /usr/local/bin/umbrella
 **Windows (PowerShell):**
 
 ```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\umbrella" | Out-Null
 Move-Item -Force "$HOME\Downloads\umbrella-windows-amd64.exe" "$env:LOCALAPPDATA\umbrella\umbrella.exe"
 ```
 
