@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.3.2 — 2026-11-11
+- Client: on Windows, a failed `/update` now says so clearly and points to the download page; permission errors there suggest running PowerShell as administrator instead of `sudo`. Linux `/update` (including through `sudo` and symlinks) was checked in a container.
+
 ## v1.3.1 — 2026-11-11
 - Client: `/update` no longer fails when Umbrella lives in a folder only an administrator can write to (e.g. `/usr/local/bin` on macOS): it hands the terminal to `sudo umbrella update`, asks for your password, then returns to the chat.
 

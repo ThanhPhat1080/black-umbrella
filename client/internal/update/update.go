@@ -154,7 +154,11 @@ func apply(ctx context.Context, rel Release, goos, goarch, exe string) error {
 	defer resp.Body.Close()
 	tmp, err := os.CreateTemp(filepath.Dir(exe), ".umbrella-update-*")
 	if err != nil {
-		return fmt.Errorf("can't write next to %s (try sudo?): %w", exe, err)
+		hint := "try sudo?"
+		if goos == "windows" {
+			hint = "run PowerShell as administrator?"
+		}
+		return fmt.Errorf("can't write next to %s (%s): %w", exe, hint, err)
 	}
 	defer os.Remove(tmp.Name())
 	h := sha256.New()
@@ -184,6 +188,15 @@ func apply(ctx context.Context, rel Release, goos, goarch, exe string) error {
 		return nil
 	}
 	return os.Rename(tmp.Name(), exe)
+}
+
+// ManualHint is appended to an update failure on Windows, where self-update can be blocked (antivirus,
+// a locked leftover file, a protected folder) and a manual download is the dependable way out.
+func ManualHint(goos string) string {
+	if goos != "windows" {
+		return ""
+	}
+	return " You can also download " + assetName(goos, "amd64") + " from https://github.com/" + Repo + "/releases/latest"
 }
 
 // NeedsRoot reports whether err means the install folder isn't writable by this user (e.g. /usr/local/bin).

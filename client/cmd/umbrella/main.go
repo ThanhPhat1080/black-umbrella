@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -145,7 +146,7 @@ func main() {
 		defer cancel()
 		tag, done, err := update.Run(ctx, Version)
 		if err != nil {
-			fail("Update failed: %v", err)
+			fail("Update failed: %v.%s", err, update.ManualHint(runtime.GOOS))
 		}
 		if done {
 			fmt.Println("Updated to", tag+". Run `umbrella` to chat.")

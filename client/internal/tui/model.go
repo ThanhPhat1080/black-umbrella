@@ -378,7 +378,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.setStatus("Update failed. In a terminal run: sudo umbrella update")
 		case msg.err != nil:
-			m.setStatus("Update failed: " + msg.err.Error())
+			m.setStatus("Update failed: " + msg.err.Error() + "." + update.ManualHint(runtime.GOOS))
 		case msg.updated:
 			m.setStatus("Updated to " + msg.tag + ". Quit (/q) and reopen to use it.")
 		default:

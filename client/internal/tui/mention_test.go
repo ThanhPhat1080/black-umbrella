@@ -240,7 +240,7 @@ func TestUpdateNeedingRootHandsTheTerminalToSudo(t *testing.T) {
 	}
 	// other errors are shown as before
 	_, cmd = m.Update(updateMsg{err: errors.New("offline")})
-	if cmd != nil || !strings.Contains(m.status, "Update failed: offline") {
+	if cmd != nil || !strings.HasPrefix(m.status, "Update failed: offline") {
 		t.Fatalf("cmd=%v status=%q", cmd, m.status)
 	}
 }
