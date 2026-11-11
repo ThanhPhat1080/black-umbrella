@@ -181,12 +181,18 @@ func TestRoomHeaderListsMembersWithOwnerAndSeparator(t *testing.T) {
 	if got := plain(title + 2); !strings.Contains(got, "────────") {
 		t.Fatalf("separator = %q", got)
 	}
-	// Hell has neither
+	// Hell gets the same header (count + everyone online) but nobody is an owner
 	m.switchConv("hell")
 	m.View()
+	sawCount, sawList := false, false
 	for i := range m.screen {
 		if strings.Contains(m.screen[i], "(owner)") {
-			t.Fatal("hell must not list members")
+			t.Fatal("hell has no owner")
 		}
+		sawCount = sawCount || (strings.Contains(m.screen[i], "# Hell room") && strings.Contains(m.screen[i], "members ·"))
+		sawList = sawList || strings.Contains(m.screen[i], "[ ● ")
+	}
+	if !sawCount || !sawList {
+		t.Fatalf("hell header missing count/list: %v", m.screen)
 	}
 }

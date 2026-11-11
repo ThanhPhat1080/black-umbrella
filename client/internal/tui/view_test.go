@@ -828,7 +828,7 @@ func TestLongTimelineScrollsOnlyAtTheEdge(t *testing.T) {
 		if m.topMain != top0 {
 			moved = true
 			// scrolled only because the selection hit the top edge
-			if !strings.Contains(strings.Split(v, "\n")[2], "▌") && !strings.Contains(strings.Split(v, "\n")[3], "▌") {
+			if !strings.Contains(strings.Split(v, "\n")[4], "▌") && !strings.Contains(strings.Split(v, "\n")[5], "▌") {
 				t.Fatalf("scrolled before the selection reached the top edge:\n%s", v)
 			}
 		} else if i > 30 {

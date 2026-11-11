@@ -51,9 +51,9 @@ func (m *Model) clickTargets() []clickTarget {
 		}
 		add("side:"+e.Conv, func() { m.switchConv(e.Conv) })
 	}
-	if r, ok := m.activeRoom(); ok {
-		for _, u := range r.Members {
-			u := u
+	for _, u := range m.headerPeople(m.st.Active()) {
+		u := u
+		if u != m.st.Me() {
 			add("rm:"+u, func() { m.openDM(u) })
 		}
 	}

@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -668,10 +669,10 @@ func (m *Model) nameOf(u string) string { return m.st.DisplayName(u) }
 
 func (m *Model) convTitle(conv string) string {
 	if conv == "hell" {
-		return nameSt.Render("# Hell room")
+		return nameSt.Render("# Hell room") + m.countLabel(m.headerPeople(conv))
 	}
 	if r, ok := m.st.RoomOf(conv); ok {
-		return nameSt.Render("◈ "+r.Name) + dim.Render(fmt.Sprintf("  %d members", len(r.Members)))
+		return nameSt.Render("◈ "+r.Name) + m.countLabel(r.Members)
 	}
 	for _, e := range m.st.Sidebar() {
 		if e.Conv == conv {
@@ -681,11 +682,53 @@ func (m *Model) convTitle(conv string) string {
 	return conv
 }
 
+// countLabel renders "  N members · M online" for a header.
+func (m *Model) countLabel(users []string) string {
+	on, n := m.isOnline(), 0
+	for _, u := range users {
+		if on(u) {
+			n++
+		}
+	}
+	return dim.Render(fmt.Sprintf("  %d members · %d online", len(users), n))
+}
+
+// headerPeople lists who is in a conversation: everyone for Hell, the members of a room, or
+// you and the other person in a direct chat. Online people come first.
+func (m *Model) headerPeople(conv string) []string {
+	var out []string
+	switch {
+	case conv == "hell":
+		for u := range m.st.Users() {
+			out = append(out, u)
+		}
+	default:
+		if r, ok := m.st.RoomOf(conv); ok {
+			return r.Members
+		}
+		for _, e := range m.st.Sidebar() {
+			if e.Conv == conv && e.Username != "" {
+				return []string{m.st.Me(), e.Username}
+			}
+		}
+		return nil
+	}
+	on := m.isOnline()
+	sort.Slice(out, func(i, j int) bool {
+		if on(out[i]) != on(out[j]) {
+			return on(out[i])
+		}
+		return strings.ToLower(m.nameOf(out[i])) < strings.ToLower(m.nameOf(out[j]))
+	})
+	return out
+}
+
 // Row backgrounds: a subtle accent, readable on dark and light terminals.
 var (
 	activeBg = lipgloss.NewStyle().Bold(true).Background(lipgloss.AdaptiveColor{Dark: "#2a3b5c", Light: "#dbe6ff"})
 	inputCol = lipgloss.AdaptiveColor{Dark: "#000000", Light: "#e2e2e8"}
 	inputBg  = lipgloss.NewStyle().Background(inputCol)
+	headerBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#1b2030", Light: "#eef1f8"})
 	selectBg = lipgloss.NewStyle().Background(lipgloss.AdaptiveColor{Dark: "#232f47", Light: "#e8eefc"})
 )
 
@@ -873,10 +916,7 @@ func (m *Model) viewChat(w, h int) string {
 	}
 	inH := m.input.Height() + 2 + 1 // text lines + box borders + the [+] line
 	bodyH := h - 2 - 1 - inH - 1    // one blank row keeps the text off the textbox
-	room, isRoom := m.activeRoom()
-	if isRoom {
-		bodyH -= 2 // member list + separator under the title
-	}
+	bodyH -= 2                      // member list + separator under the title
 	if bodyH < 1 {
 		bodyH = 1
 	}
@@ -890,9 +930,11 @@ func (m *Model) viewChat(w, h int) string {
 	if m.pane == paneMain {
 		sel = m.selMain
 	}
-	lines := []string{title}
-	if isRoom {
-		lines = append(lines, m.roomMembersLine(room, inner), dim.Render(strings.Repeat("─", inner)))
+	room, _ := m.activeRoom()
+	lines := []string{
+		bgFill(" "+title, inner, headerBg),
+		bgFill(" "+m.membersLine(conv, room, inner-1), inner, headerBg),
+		dim.Render(strings.Repeat("─", inner)),
 	}
 	lines = append(lines, window(blocks, sel, bodyH, &m.topMain, &m.pinMain)...)
 	lines = append(lines, dim.Italic(true).Render(truncate(m.roomNotice(), maxInt(1, inner))))
@@ -917,18 +959,18 @@ func (m *Model) viewChat(w, h int) string {
 	return paneBox(fit(lines, inner, h-2), inner, m.pane != paneThread && m.pane != paneThreadInput)
 }
 
-// roomMembersLine lists the room's people as "[ ● A, ○ B ]" (green dot = online); the owner is
+// membersLine lists the conversation's people as "[ ● A, ○ B ]" (green dot = online); the owner is
 // picked out in the accent colour and marked "(owner)".
-func (m *Model) roomMembersLine(r proto.Room, w int) string {
+func (m *Model) membersLine(conv string, r proto.Room, w int) string {
 	on := m.isOnline()
 	var parts []string
-	for _, u := range r.Members {
+	for _, u := range m.headerPeople(conv) {
 		dot := dim.Render("○")
 		if on(u) {
 			dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
 		}
 		st, label := nameStyle(u), m.nameOf(u)
-		if u == r.Owner {
+		if u == r.Owner && r.Owner != "" {
 			st, label = accent.Bold(true), label+" (owner)"
 		}
 		if m.hover == "rm:"+u {
@@ -1051,7 +1093,7 @@ func (m *Model) overlayView() []string {
 				dot = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Render("●")
 			}
 			row := dot + " " + nameStyle(u).Render(m.nameOf(u)) + " " + dim.Render("@"+u)
-			if u == r.Owner {
+			if u == r.Owner && r.Owner != "" {
 				row += " " + accent.Render("owner")
 			}
 			lines = append(lines, row)

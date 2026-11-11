@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.4.1 — 2026-11-11
+- Client: every conversation header (Hell room, private rooms, direct chats) now has the room-style layout: title with member and online counts, the list of people (green dot = online, click a name to chat), and a divider, on a slightly tinted background.
+
 ## v1.4.0 — 2026-11-11
 - Client: `@mentions` show the person's display name (`● @Phát 🌂`) instead of the username.
 - Client: a `/buzz` plays a system alert sound; being `@mentioned` plays a softer one (macOS system sounds, Windows system sound, freedesktop sounds on Linux, terminal bell as fallback).
