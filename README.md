@@ -6,6 +6,10 @@ End-to-end encrypted terminal chat for a small team: a Hell room, direct message
 a keep (anchor) button and 24-hour message expiry. A Cloudflare Worker + Durable Object stores
 ciphertext only; a cross-platform Go TUI client (`umbrella`) does all the cryptography.
 
+<img width="769" height="527" alt="Screenshot 2026-11-12 at 10 07 35" src="https://github.com/user-attachments/assets/a21fb4f9-ee6c-4fd4-a000-8bad00c47de8" />
+
+
+
 ```
 client/   Go TUI (Bubble Tea), NaCl box/secretbox, Argon2id key file
 server/   Cloudflare Worker + Durable Object (SQLite), tested in Node via node:sqlite
